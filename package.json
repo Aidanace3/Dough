@@ -1,0 +1,25 @@
+{
+  "name": "Dough",
+  "displayName": "doe",
+  "description": "dough support",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "dough",
+      "aliases": ["Dough", "dough"],
+      "extensions": [".doe",".dough",""],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "dough",
+      "scopeName": "source.doe",
+      "path": "./syntaxes/dough.tmLanguage.json"
+    }]
+  }
+}
