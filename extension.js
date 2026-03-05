@@ -12,6 +12,8 @@ const CLOSING_TO_OPENING = {
 const POINT_DECL_RE = /^\s*\(\*([A-Za-z_][A-Za-z0-9_]*)\:?\)\s*awaitval\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*\)/i;
 const LEGACY_POINT_CASE_RE = /^\s*\*([A-Za-z_][A-Za-z0-9_]*)\s+ifcase\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*\)\s*$/i;
 const CONF_RE = /^\s*conf\s+[A-Za-z_][A-Za-z0-9_]*\s*\.\s*[A-Za-z_][A-Za-z0-9_]*\s*=\s*.+;?\s*$/i;
+const COND_RE = /^(if|elif)\s*\((.*)\)/i;
+const BARE_ASSIGNMENT_RE = /(^|[^=!<>])=($|[^=>])/;
 
 function activate(context) {
   const diagnostics = vscode.languages.createDiagnosticCollection('dough-syntax');
@@ -370,6 +372,8 @@ function runLineGrammarChecks(document, lines, problems) {
   const declaredPoints = new Map();
   const explicitPointCalls = new Set();
   const implicitPointCalls = new Set();
+  const pointRefs = [];
+  const functionScope = createFunctionScopeIndex(lines);
 
   for (let li = 0; li < lines.length; li++) {
     const original = lines[li];
@@ -416,6 +420,21 @@ function runLineGrammarChecks(document, lines, problems) {
       }
     }
 
+    const cond = line.match(COND_RE);
+    if (cond && BARE_ASSIGNMENT_RE.test(cond[2])) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          'Suspicious assignment in condition. Use == for comparison.',
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+
     if (/^def\b/i.test(line) && !/^def\s+[A-Za-z_][A-Za-z0-9_]*/i.test(line)) {
       problems.push(
         diagnostic(
@@ -426,6 +445,34 @@ function runLineGrammarChecks(document, lines, problems) {
           original.length,
           'Function declaration must include a valid name after def.',
           vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
+    if (/^case\b/i.test(line) && !/:$/.test(line) && !line.includes('::')) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "Case clause should end with ':'.",
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+
+    if (/^default\b/i.test(line) && !line.includes(':')) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "Default clause should include ':'.",
+          vscode.DiagnosticSeverity.Warning
         )
       );
     }
@@ -460,7 +507,21 @@ function runLineGrammarChecks(document, lines, problems) {
       );
     }
 
-    collectPointCalls(line, explicitPointCalls, implicitPointCalls);
+    if (/\breturn\b/i.test(line) && !functionScope.isInsideFunction(li)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          'return outside function block.',
+          vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
+    collectPointCalls(line, li, explicitPointCalls, implicitPointCalls, pointRefs);
   }
 
   for (const name of implicitPointCalls) {
@@ -486,9 +547,27 @@ function runLineGrammarChecks(document, lines, problems) {
       )
     );
   }
+
+  for (const ref of pointRefs) {
+    if (declaredPoints.has(ref.name)) {
+      continue;
+    }
+
+    problems.push(
+      diagnostic(
+        document,
+        ref.line,
+        ref.col,
+        ref.line,
+        ref.col + ref.length,
+        `Point '*${ref.rawName}' is referenced but never declared.`,
+        vscode.DiagnosticSeverity.Error
+      )
+    );
+  }
 }
 
-function collectPointCalls(line, explicitPointCalls, implicitPointCalls) {
+function collectPointCalls(line, lineIndex, explicitPointCalls, implicitPointCalls, pointRefs) {
   let m;
 
   const explicitRefs = [
@@ -500,6 +579,13 @@ function collectPointCalls(line, explicitPointCalls, implicitPointCalls) {
   for (const re of explicitRefs) {
     while ((m = re.exec(line)) !== null) {
       explicitPointCalls.add(m[1].toLowerCase());
+      pointRefs.push({
+        name: m[1].toLowerCase(),
+        rawName: m[1],
+        line: lineIndex,
+        col: m.index,
+        length: Math.max(2, m[1].length + 1)
+      });
     }
   }
 
@@ -513,9 +599,83 @@ function collectPointCalls(line, explicitPointCalls, implicitPointCalls) {
       const pointName = m[1].toLowerCase();
       if (pointName !== 'this') {
         implicitPointCalls.add(pointName);
+        pointRefs.push({
+          name: pointName,
+          rawName: m[1],
+          line: lineIndex,
+          col: m.index,
+          length: Math.max(1, m[1].length)
+        });
       }
     }
   }
+}
+
+function createFunctionScopeIndex(lines) {
+  const functionLines = new Set();
+  let braceDepth = 0;
+  let pendingFunctionStart = false;
+  const functionDepthMarkers = [];
+
+  for (let li = 0; li < lines.length; li++) {
+    const line = stripLineCommentPreserveQuotes(lines[li]);
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+
+    if (/^def\s+[A-Za-z_][A-Za-z0-9_]*/i.test(trimmed)) {
+      pendingFunctionStart = true;
+    }
+
+    const opens = countCharOutsideStrings(line, '{');
+    const closes = countCharOutsideStrings(line, '}');
+
+    for (let i = 0; i < opens; i++) {
+      braceDepth++;
+      if (pendingFunctionStart) {
+        functionDepthMarkers.push(braceDepth);
+        pendingFunctionStart = false;
+      }
+    }
+
+    if (functionDepthMarkers.length > 0) {
+      functionLines.add(li);
+    }
+
+    for (let i = 0; i < closes; i++) {
+      if (functionDepthMarkers.length > 0 && braceDepth === functionDepthMarkers[functionDepthMarkers.length - 1]) {
+        functionDepthMarkers.pop();
+      }
+
+      braceDepth = Math.max(0, braceDepth - 1);
+    }
+  }
+
+  return {
+    isInsideFunction(lineIndex) {
+      return functionLines.has(lineIndex);
+    }
+  };
+}
+
+function countCharOutsideStrings(line, target) {
+  let inString = false;
+  let count = 0;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"' && line[i - 1] !== '\\') {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString && ch === target) {
+      count++;
+    }
+  }
+
+  return count;
 }
 
 function stripLineCommentPreserveQuotes(line) {

@@ -3,7 +3,7 @@
   "publisher": "aidanace3",
   "displayName": "Dough Language",
   "description": "Syntax highlighting and language configuration for Dough files (doe shorthand supported).",
-  "version": "0.1.2",
+  "version": "0.7.2",
   "icon": "assets/favicon_fileimg.png",
   "license": "MIT",
   "repository": {
