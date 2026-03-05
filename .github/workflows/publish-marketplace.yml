@@ -1,0 +1,33 @@
+name: Publish Dough Extension
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+  push:
+    tags:
+      - "dough-v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify extension entrypoint
+        run: node --check extension.js
+
+      - name: Publish to VS Code Marketplace
+        run: npx @vscode/vsce publish --pat "${{ secrets.VSCE_PAT }}"

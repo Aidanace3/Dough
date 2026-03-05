@@ -1,24 +1,39 @@
 {
-  "name": "Dough",
-  "displayName": "doe",
-  "description": "dough support",
-  "version": "0.0.1",
+  "name": "dough-language",
+  "publisher": "aidanace3",
+  "displayName": "Dough Language",
+  "description": "Syntax highlighting and language configuration for Dough files (doe shorthand supported).",
+  "version": "0.1.2",
+  "icon": "assets/favicon_fileimg.png",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Aidanace3/Doe-Language.git"
+  },
+  "homepage": "https://github.com/Aidanace3/Doe-Language",
+  "bugs": {
+    "url": "https://github.com/Aidanace3/Doe-Language/issues"
+  },
   "engines": {
     "vscode": "^1.109.0"
   },
   "categories": [
     "Programming Languages"
   ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:dough"
+  ],
   "contributes": {
     "languages": [{
       "id": "dough",
-      "aliases": ["Dough", "dough"],
-      "extensions": [".doe",".dough",""],
+      "aliases": ["Dough", "dough", "Doe", "doe"],
+      "extensions": [".doe", ".dough"],
       "configuration": "./language-configuration.json"
     }],
     "grammars": [{
       "language": "dough",
-      "scopeName": "source.doe",
+      "scopeName": "source.dough",
       "path": "./syntaxes/dough.tmLanguage.json"
     }]
   }

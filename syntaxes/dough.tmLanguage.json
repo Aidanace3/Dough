@@ -1,9 +1,11 @@
 {
-  "scopeName": "source.doe",
-  "name": "Doe Language",
+  "scopeName": "source.dough",
+  "name": "Dough Language",
   "patterns": [
     { "include": "#comments" },
     { "include": "#strings" },
+    { "include": "#points" },
+    { "include": "#booleans" },
     { "include": "#numbers" },
     { "include": "#keywords" },
     { "include": "#types" },
@@ -14,58 +16,106 @@
     "comments": {
       "patterns": [
         {
-          "name": "comment.line.double-slash.doe",
+          "name": "comment.line.double-slash.dough",
           "begin": "//",
-          "beginCaptures": { "0": { "name": "punctuation.definition.comment.doe" } },
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.comment.dough" }
+          },
           "end": "$"
         },
         {
-          "name": "comment.block.doe",
+          "name": "comment.block.dough",
           "begin": "/\\(",
-          "beginCaptures": { "0": { "name": "punctuation.definition.comment.begin.doe" } },
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.comment.begin.dough" }
+          },
           "end": "\\)\\\\",
-          "endCaptures": { "0": { "name": "punctuation.definition.comment.end.doe" } }
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.comment.end.dough" }
+          }
         }
       ]
     },
     "strings": {
       "patterns": [
         {
-          "name": "string.quoted.double.doe",
+          "name": "string.quoted.double.dough",
           "begin": "\"",
           "end": "\"",
           "patterns": [
-            { "name": "constant.character.escape.doe", "match": "\\\\." }
+            { "name": "constant.character.escape.dough", "match": "\\\\." }
           ]
+        }
+      ]
+    },
+    "points": {
+      "patterns": [
+        {
+          "name": "entity.name.label.point.declaration.dough",
+          "match": "\\(\\*[A-Za-z_][A-Za-z0-9_]*:?\\)"
+        },
+        {
+          "name": "variable.parameter.pointref.dough",
+          "match": "\\*[A-Za-z_][A-Za-z0-9_]*"
+        }
+      ]
+    },
+    "booleans": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.dough",
+          "match": "@(?:true|false)\\b"
+        },
+        {
+          "name": "constant.language.null.dough",
+          "match": "(?i:\\bnull\\b)"
         }
       ]
     },
     "numbers": {
       "patterns": [
-        { "name": "constant.numeric.float.doe", "match": "\\b\\d+\\.\\d+\\b" },
-        { "name": "constant.numeric.integer.doe", "match": "\\b\\d+\\b" }
+        {
+          "name": "constant.numeric.float.dough",
+          "match": "\\b\\d+\\.\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.dough",
+          "match": "\\b\\d+\\b"
+        }
       ]
     },
     "keywords": {
       "patterns": [
-        { "name": "keyword.control.doe", "match": "\\b(if|else|otherwise|ifcase|case|default|break|then|end|def|import)\\b" },
-        { "name": "constant.language.null.doe", "match": "\\bnull\\b" }
+        {
+          "name": "keyword.control.dough",
+          "match": "(?i:\\b(?:if|elif|else|otherwise|ifcase|case|default|break|then|end|def|import|awaitval|return|yield|yeild|dict|locked|conf)\\b)"
+        }
       ]
     },
     "types": {
       "patterns": [
-        { "name": "storage.type.doe", "match": "\\b(nopoly|const|str|string|int|flt|arr)\\b" }
+        {
+          "name": "storage.type.dough",
+          "match": "(?i:\\b(?:nopoly|const|str|string|int|flt|arr|dict|locked)\\b)"
+        }
       ]
     },
     "functions": {
       "patterns": [
-        { "name": "support.function.builtin.doe", "match": "\\b(Print|Input|readln)\\b" }
+        {
+          "name": "support.function.builtin.dough",
+          "match": "(?i:\\b(?:Print|Input|readln|Max|Min|exit|conf)\\b)"
+        }
       ]
     },
     "operators": {
       "patterns": [
-        { "name": "keyword.operator.doe", "match": "(::|=>|<=|>=|&&|!\\||!&|\\*\\||\\.\\.|[=<>+\\-*/%|!&])" }
+        {
+          "name": "keyword.operator.dough",
+          "match": "(>>|<<|::|==|=>|<=|>=|\\*\\*|%%|&&|!\\||!&|\\*\\||\\.\\.|[=<>+\\-*/%^|!&?])"
+        }
       ]
     }
   }
 }
+
