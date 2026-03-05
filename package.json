@@ -3,7 +3,7 @@
   "publisher": "aidanace3",
   "displayName": "Dough Language",
   "description": "Syntax highlighting and language configuration for Dough files (doe shorthand supported).",
-  "version": "0.7.2",
+  "version": "0.7.3-alpha-1.BUGFIX",
   "icon": "assets/favicon_fileimg.png",
   "license": "MIT",
   "repository": {
@@ -42,7 +42,9 @@
       {
         "type": "dough",
         "label": "Dough Debugger",
-        "languages": ["dough"],
+        "languages": [
+          "dough"
+        ],
         "configurationAttributes": {
           "launch": {
             "required": [],
@@ -77,16 +79,28 @@
         ]
       }
     ],
-    "languages": [{
-      "id": "dough",
-      "aliases": ["Dough", "dough", "Doe", "doe"],
-      "extensions": [".doe", ".dough"],
-      "configuration": "./language-configuration.json"
-    }],
-    "grammars": [{
-      "language": "dough",
-      "scopeName": "source.dough",
-      "path": "./syntaxes/dough.tmLanguage.json"
-    }]
+    "languages": [
+      {
+        "id": "dough",
+        "aliases": [
+          "Dough",
+          "dough",
+          "Doe",
+          "doe"
+        ],
+        "extensions": [
+          ".doe",
+          ".dough"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "dough",
+        "scopeName": "source.dough",
+        "path": "./syntaxes/dough.tmLanguage.json"
+      }
+    ]
   }
 }

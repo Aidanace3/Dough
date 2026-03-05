@@ -4,6 +4,12 @@ All notable changes to the "Dough" extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.7.3-alpha-1.BUGFIX]
+
+- Added expanded parser + editor diagnostics for new README syntax forms.
+- Added `yeild value >> *Point as alias` dispatch syntax.
+- Added `as(...)` and `each(... in ...) do:` loop support.
+
 ## [0.7.2]
 
 - Improved syntax diagnostics:
