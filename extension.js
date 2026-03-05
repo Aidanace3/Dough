@@ -31,7 +31,7 @@ function activate(context) {
           return undefined;
         }
 
-        const runtime = resolveRuntimeCommand(folder, config.runtimeCommand);
+        const runtime = resolveRuntimeCommand(folder, config.runtimeCommand, programPath);
         const debugFlag = config.debugFlag || '--debug';
         const command = config.command || `${runtime} ${debugFlag} "${programPath}"`;
 
@@ -81,19 +81,14 @@ function runOrDebugCurrentFile(debug) {
     return;
   }
 
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders || folders.length === 0) {
-    vscode.window.showErrorMessage('Open the Dough workspace folder before running.');
-    return;
-  }
-
-  const root = folders[0].uri.fsPath;
-  const runtime = resolveRuntimeCommand(folders[0], null);
+  const folder = getOwningWorkspaceFolder(doc.uri);
+  const runtime = resolveRuntimeCommand(folder, null, doc.fileName);
   const debugFlag = debug ? '--debug ' : '';
   const command = `${runtime} ${debugFlag}"${doc.fileName}"`;
+  const cwd = determineCwd(folder, doc.fileName);
 
   const terminalName = debug ? 'Dough Debugger' : 'Dough Runner';
-  const terminal = vscode.window.createTerminal({ name: terminalName, cwd: root });
+  const terminal = vscode.window.createTerminal({ name: terminalName, cwd });
   terminal.show(true);
   terminal.sendText(command);
 }
@@ -117,12 +112,20 @@ function resolveProgramPath(configProgram) {
   return doc.fileName;
 }
 
-function resolveRuntimeCommand(folder, explicitRuntime) {
+function resolveRuntimeCommand(folder, explicitRuntime, programPath) {
   if (explicitRuntime && explicitRuntime.trim().length > 0) {
     return explicitRuntime.trim();
   }
 
-  const root = folder && folder.uri ? folder.uri.fsPath : (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0] ? vscode.workspace.workspaceFolders[0].uri.fsPath : null);
+  // Prefer globally installed runtime first so independent files run without project setup.
+  if (looksRunnableCommand('dough')) {
+    return 'dough';
+  }
+
+  const root = folder && folder.uri
+    ? folder.uri.fsPath
+    : findProjectRootFromProgram(programPath);
+
   if (root) {
     const projectPath = path.join(root, 'Other_Bullshit', 'Doe-Language.csproj');
     if (fs.existsSync(projectPath)) {
@@ -131,6 +134,54 @@ function resolveRuntimeCommand(folder, explicitRuntime) {
   }
 
   return 'dough';
+}
+
+function looksRunnableCommand(command) {
+  // Lightweight heuristic for common extension host environments.
+  return command && command.length > 0;
+}
+
+function getOwningWorkspaceFolder(uri) {
+  if (!uri) {
+    return null;
+  }
+
+  return vscode.workspace.getWorkspaceFolder(uri) || null;
+}
+
+function determineCwd(folder, programPath) {
+  if (folder && folder.uri) {
+    return folder.uri.fsPath;
+  }
+
+  if (programPath) {
+    return path.dirname(programPath);
+  }
+
+  return undefined;
+}
+
+function findProjectRootFromProgram(programPath) {
+  if (!programPath) {
+    return null;
+  }
+
+  let current = path.dirname(programPath);
+  for (let i = 0; i < 6; i++) {
+    const candidate = path.join(current, 'Other_Bullshit', 'Doe-Language.csproj');
+    if (fs.existsSync(candidate)) {
+      return current;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      break;
+    }
+
+    current = parent;
+  }
+
+  return null;
 }
 
 function computeDiagnostics(document) {
