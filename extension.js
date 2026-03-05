@@ -15,6 +15,11 @@ function activate(context) {
   const diagnostics = vscode.languages.createDiagnosticCollection('dough-syntax');
   context.subscriptions.push(diagnostics);
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand('dough.runCurrentFile', () => runOrDebugCurrentFile(false)),
+    vscode.commands.registerCommand('dough.debugCurrentFile', () => runOrDebugCurrentFile(true))
+  );
+
   const validate = (document) => {
     if (document.languageId !== 'dough') {
       return;
@@ -36,6 +41,38 @@ function activate(context) {
 }
 
 function deactivate() {}
+
+function runOrDebugCurrentFile(debug) {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    vscode.window.showErrorMessage('Open a .doe/.dough file first.');
+    return;
+  }
+
+  const doc = editor.document;
+  const ext = doc.fileName.toLowerCase();
+  if (doc.languageId !== 'dough' && !ext.endsWith('.doe') && !ext.endsWith('.dough')) {
+    vscode.window.showErrorMessage('Current file is not a Dough source file.');
+    return;
+  }
+
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    vscode.window.showErrorMessage('Open the Dough workspace folder before running.');
+    return;
+  }
+
+  const root = folders[0].uri.fsPath;
+  const project = `${root}\\Other_Bullshit\\Doe-Language.csproj`;
+  const file = doc.fileName;
+  const flags = debug ? '--debug' : '';
+  const command = `dotnet run --project "${project}" -- ${flags} "${file}"`.replace(/\s+/g, ' ').trim();
+
+  const terminalName = debug ? 'Dough Debugger' : 'Dough Runner';
+  const terminal = vscode.window.createTerminal({ name: terminalName, cwd: root });
+  terminal.show(true);
+  terminal.sendText(command);
+}
 
 function computeDiagnostics(document) {
   const text = document.getText();

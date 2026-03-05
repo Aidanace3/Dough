@@ -19,6 +19,9 @@ This extension provides syntax highlighting and editor behavior for Dough files.
 1. Open this `Dough` folder in VS Code.
 2. Press `F5`.
 3. In the new Extension Development Host window, open a `.doe` file.
+4. Use command palette:
+   - `Dough: Run Current File`
+   - `Dough: Debug Current File`
 
 ## Install From Marketplace (Recommended)
 1. From terminal:

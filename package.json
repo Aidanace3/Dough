@@ -22,9 +22,21 @@
   ],
   "main": "./extension.js",
   "activationEvents": [
-    "onLanguage:dough"
+    "onLanguage:dough",
+    "onCommand:dough.debugCurrentFile",
+    "onCommand:dough.runCurrentFile"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "dough.debugCurrentFile",
+        "title": "Dough: Debug Current File"
+      },
+      {
+        "command": "dough.runCurrentFile",
+        "title": "Dough: Run Current File"
+      }
+    ],
     "languages": [{
       "id": "dough",
       "aliases": ["Dough", "dough", "Doe", "doe"],
