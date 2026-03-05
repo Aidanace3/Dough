@@ -1,4 +1,6 @@
 const vscode = require('vscode');
+const fs = require('fs');
+const path = require('path');
 
 const OPENING = new Set(['(', '[', '{']);
 const CLOSING_TO_OPENING = {
@@ -18,6 +20,29 @@ function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand('dough.runCurrentFile', () => runOrDebugCurrentFile(false)),
     vscode.commands.registerCommand('dough.debugCurrentFile', () => runOrDebugCurrentFile(true))
+  );
+
+  context.subscriptions.push(
+    vscode.debug.registerDebugConfigurationProvider('dough', {
+      resolveDebugConfiguration(folder, config) {
+        const programPath = resolveProgramPath(config.program);
+        if (!programPath) {
+          vscode.window.showErrorMessage('Open a .doe/.dough file first.');
+          return undefined;
+        }
+
+        const runtime = resolveRuntimeCommand(folder, config.runtimeCommand);
+        const debugFlag = config.debugFlag || '--debug';
+        const command = config.command || `${runtime} ${debugFlag} "${programPath}"`;
+
+        return {
+          type: 'node-terminal',
+          request: 'launch',
+          name: config.name || 'Dough: Debug Current File',
+          command
+        };
+      }
+    })
   );
 
   const validate = (document) => {
@@ -63,15 +88,49 @@ function runOrDebugCurrentFile(debug) {
   }
 
   const root = folders[0].uri.fsPath;
-  const project = `${root}\\Other_Bullshit\\Doe-Language.csproj`;
-  const file = doc.fileName;
-  const flags = debug ? '--debug' : '';
-  const command = `dotnet run --project "${project}" -- ${flags} "${file}"`.replace(/\s+/g, ' ').trim();
+  const runtime = resolveRuntimeCommand(folders[0], null);
+  const debugFlag = debug ? '--debug ' : '';
+  const command = `${runtime} ${debugFlag}"${doc.fileName}"`;
 
   const terminalName = debug ? 'Dough Debugger' : 'Dough Runner';
   const terminal = vscode.window.createTerminal({ name: terminalName, cwd: root });
   terminal.show(true);
   terminal.sendText(command);
+}
+
+function resolveProgramPath(configProgram) {
+  if (configProgram && configProgram !== '${file}') {
+    return configProgram;
+  }
+
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return null;
+  }
+
+  const doc = editor.document;
+  const ext = doc.fileName.toLowerCase();
+  if (doc.languageId !== 'dough' && !ext.endsWith('.doe') && !ext.endsWith('.dough')) {
+    return null;
+  }
+
+  return doc.fileName;
+}
+
+function resolveRuntimeCommand(folder, explicitRuntime) {
+  if (explicitRuntime && explicitRuntime.trim().length > 0) {
+    return explicitRuntime.trim();
+  }
+
+  const root = folder && folder.uri ? folder.uri.fsPath : (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0] ? vscode.workspace.workspaceFolders[0].uri.fsPath : null);
+  if (root) {
+    const projectPath = path.join(root, 'Other_Bullshit', 'Doe-Language.csproj');
+    if (fs.existsSync(projectPath)) {
+      return `dotnet run --project "${projectPath}" --`;
+    }
+  }
+
+  return 'dough';
 }
 
 function computeDiagnostics(document) {

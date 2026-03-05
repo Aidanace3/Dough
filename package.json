@@ -24,7 +24,8 @@
   "activationEvents": [
     "onLanguage:dough",
     "onCommand:dough.debugCurrentFile",
-    "onCommand:dough.runCurrentFile"
+    "onCommand:dough.runCurrentFile",
+    "onDebugResolve:dough"
   ],
   "contributes": {
     "commands": [
@@ -35,6 +36,45 @@
       {
         "command": "dough.runCurrentFile",
         "title": "Dough: Run Current File"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "dough",
+        "label": "Dough Debugger",
+        "languages": ["dough"],
+        "configurationAttributes": {
+          "launch": {
+            "required": [],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Path to the Dough source file (.doe/.dough). Defaults to current file."
+              },
+              "runtimeCommand": {
+                "type": "string",
+                "description": "Optional runtime command override. Example: dough"
+              },
+              "command": {
+                "type": "string",
+                "description": "Optional full command override for terminal launch."
+              },
+              "debugFlag": {
+                "type": "string",
+                "description": "Flag used to enable debug mode on runtime.",
+                "default": "--debug"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "name": "Dough: Debug Current File",
+            "type": "dough",
+            "request": "launch",
+            "program": "${file}"
+          }
+        ]
       }
     ],
     "languages": [{

@@ -23,6 +23,23 @@ This extension provides syntax highlighting and editor behavior for Dough files.
    - `Dough: Run Current File`
    - `Dough: Debug Current File`
 
+## Run and Debug (F5) in normal VS Code
+Use a launch configuration like this:
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Dough: Debug Current File",
+      "type": "dough",
+      "request": "launch",
+      "program": "${file}"
+    }
+  ]
+}
+```
+
 ## Install From Marketplace (Recommended)
 1. From terminal:
    - `code --install-extension aidanace3.dough-language`
