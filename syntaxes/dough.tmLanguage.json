@@ -88,7 +88,7 @@
       "patterns": [
         {
           "name": "keyword.control.dough",
-          "match": "(?i:\\b(?:if|elif|else|otherwise|ifcase|case|default|break|then|end|def|import|awaitval|return|yield|yeild|dict|locked|conf)\\b)"
+          "match": "(?i:\\b(?:if|elif|else|otherwise|ifcase|case|default|outlier|break|then|end|def|import|awaitval|return|yield|yeild|dict|locked|conf|as|each|in|do|loop|asa)\\b)"
         }
       ]
     },
@@ -104,7 +104,7 @@
       "patterns": [
         {
           "name": "support.function.builtin.dough",
-          "match": "(?i:\\b(?:Print|Input|readln|Max|Min|exit|conf)\\b)"
+          "match": "(?i:\\b(?:Print|Input|readln|Max|Min|exit|conf|Store|request)\\b)"
         }
       ]
     },

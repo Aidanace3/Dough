@@ -12,6 +12,13 @@ const CLOSING_TO_OPENING = {
 const POINT_DECL_RE = /^\s*\(\*([A-Za-z_][A-Za-z0-9_]*)\:?\)\s*awaitval\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*\)/i;
 const LEGACY_POINT_CASE_RE = /^\s*\*([A-Za-z_][A-Za-z0-9_]*)\s+ifcase\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*\)\s*$/i;
 const CONF_RE = /^\s*conf\s+[A-Za-z_][A-Za-z0-9_]*\s*\.\s*[A-Za-z_][A-Za-z0-9_]*\s*=\s*.+;?\s*$/i;
+const AS_LOOP_RE = /^\s*as\s*\(\s*.+\s*\)\s*:?\s*$/i;
+const EACH_LOOP_RE = /^\s*each\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s+in\s+.+\)\s*(?:do)?\s*:?\s*$/i;
+const YIELD_DISPATCH_RE = /^\s*(?:yield|yeild)\s+.+\s*>>\s*\*[A-Za-z_][A-Za-z0-9_]*(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?\s*;?\s*$/i;
+const YIELD_CALL_RE = /^\s*(?:yield|yeild)\s*\(.+\)\s*;?\s*$/i;
+const RETURN_POINT_RE = /^\s*return\b.+>>\s*\(?\s*(?:\*[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*|this)\s*\)?\s*;?\s*$/i;
+const STORE_RE = /^\s*store\s*\(\s*.+\s+asa\s+[A-Za-z_][A-Za-z0-9_]*\s*>>\s*\*[A-Za-z_][A-Za-z0-9_]*\s*\)\s*;?\s*$/i;
+const REQUEST_RE = /^\s*request\s*\(\s*.+\s*<<\s*\*[A-Za-z_][A-Za-z0-9_]*\s*\.\s*[A-Za-z_][A-Za-z0-9_]*\s*\)\s*;?\s*$/i;
 const COND_RE = /^(if|elif)\s*\((.*)\)/i;
 const BARE_ASSIGNMENT_RE = /(^|[^=!<>])=($|[^=>])/;
 
@@ -374,6 +381,7 @@ function runLineGrammarChecks(document, lines, problems) {
   const implicitPointCalls = new Set();
   const pointRefs = [];
   const functionScope = createFunctionScopeIndex(lines);
+  const loopScope = createLoopScopeIndex(lines);
 
   for (let li = 0; li < lines.length; li++) {
     const original = lines[li];
@@ -418,6 +426,90 @@ function runLineGrammarChecks(document, lines, problems) {
           )
         );
       }
+    }
+
+    if (/^as\b/i.test(line) && !AS_LOOP_RE.test(line)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "Invalid loop syntax. Use: as(condition):",
+          vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
+    if (/^each\b/i.test(line) && !EACH_LOOP_RE.test(line)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "Invalid each syntax. Use: each(item in iterable) do:",
+          vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
+    if (/^(yield|yeild)\b/i.test(line) && !YIELD_DISPATCH_RE.test(line) && !YIELD_CALL_RE.test(line)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "Invalid yeild/yield syntax. Use: yeild(value >> *Point) or yeild value >> *Point as alias",
+          vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
+    if (/^return\b/i.test(line) && line.includes('>>') && !RETURN_POINT_RE.test(line)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "Malformed return dispatch. Use: return value >> *Point (or >> this).",
+          vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
+    if (/^store\b/i.test(line) && !STORE_RE.test(line)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "Invalid Store syntax. Use: Store(value Asa name >> *Point)",
+          vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
+    if (/^request\b/i.test(line) && !REQUEST_RE.test(line)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "Invalid request syntax. Use: request(x << *Point.StoredName)",
+          vscode.DiagnosticSeverity.Error
+        )
+      );
     }
 
     const cond = line.match(COND_RE);
@@ -516,6 +608,20 @@ function runLineGrammarChecks(document, lines, problems) {
           li,
           original.length,
           'return outside function block.',
+          vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
+    if (/^\s*break\b/i.test(line) && !loopScope.isInsideLoop(li)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          'break outside loop block.',
           vscode.DiagnosticSeverity.Error
         )
       );
@@ -655,6 +761,54 @@ function createFunctionScopeIndex(lines) {
   return {
     isInsideFunction(lineIndex) {
       return functionLines.has(lineIndex);
+    }
+  };
+}
+
+function createLoopScopeIndex(lines) {
+  const loopLines = new Set();
+  let braceDepth = 0;
+  let pendingLoopStart = false;
+  const loopDepthMarkers = [];
+
+  for (let li = 0; li < lines.length; li++) {
+    const line = stripLineCommentPreserveQuotes(lines[li]);
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+
+    if (/^(as\s*\(|each\s*\()/i.test(trimmed)) {
+      pendingLoopStart = true;
+    }
+
+    const opens = countCharOutsideStrings(line, '{');
+    const closes = countCharOutsideStrings(line, '}');
+
+    for (let i = 0; i < opens; i++) {
+      braceDepth++;
+      if (pendingLoopStart) {
+        loopDepthMarkers.push(braceDepth);
+        pendingLoopStart = false;
+      }
+    }
+
+    if (loopDepthMarkers.length > 0) {
+      loopLines.add(li);
+    }
+
+    for (let i = 0; i < closes; i++) {
+      if (loopDepthMarkers.length > 0 && braceDepth === loopDepthMarkers[loopDepthMarkers.length - 1]) {
+        loopDepthMarkers.pop();
+      }
+
+      braceDepth = Math.max(0, braceDepth - 1);
+    }
+  }
+
+  return {
+    isInsideLoop(lineIndex) {
+      return loopLines.has(lineIndex);
     }
   };
 }
