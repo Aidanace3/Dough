@@ -27,7 +27,10 @@ jobs:
         run: npm ci
 
       - name: Verify extension entrypoint
-        run: node --check extension.js
+        run: npm run check
+
+      - name: Validate package
+        run: npx @vscode/vsce package --no-dependencies
 
       - name: Publish to VS Code Marketplace
-        run: npx @vscode/vsce publish --pat "${{ secrets.VSCE_PAT }}"
+        run: npx @vscode/vsce publish --no-dependencies --pat "${{ secrets.VSCE_PAT }}"

@@ -3,7 +3,7 @@
   "publisher": "aidanace3",
   "displayName": "Dough Language",
   "description": "Syntax highlighting and language configuration for Dough files (doe shorthand supported).",
-  "version": "0.7.3-alpha-1.BUGFIX",
+  "version": "0.8.2",
   "icon": "assets/favicon_fileimg.png",
   "license": "MIT",
   "repository": {
@@ -20,6 +20,11 @@
   "categories": [
     "Programming Languages"
   ],
+  "scripts": {
+    "check": "node --check extension.js",
+    "package:vsix": "vsce package --no-dependencies",
+    "publish:marketplace": "vsce publish --no-dependencies"
+  },
   "main": "./extension.js",
   "activationEvents": [
     "onLanguage:dough",
@@ -92,6 +97,10 @@
           ".doe",
           ".dough"
         ],
+        "icon": {
+          "light": "./assets/favicon_fileimg.png",
+          "dark": "./assets/favicon_fileimg.png"
+        },
         "configuration": "./language-configuration.json"
       }
     ],

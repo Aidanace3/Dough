@@ -7,9 +7,13 @@
     { "include": "#points" },
     { "include": "#booleans" },
     { "include": "#numbers" },
+    { "include": "#specialVariables" },
+    { "include": "#deprecated" },
+    { "include": "#declarations" },
     { "include": "#keywords" },
     { "include": "#types" },
     { "include": "#functions" },
+    { "include": "#calls" },
     { "include": "#operators" }
   ],
   "repository": {
@@ -84,11 +88,53 @@
         }
       ]
     },
+    "specialVariables": {
+      "patterns": [
+        {
+          "name": "variable.language.this.dough",
+          "match": "(?i:\\bthis\\b)"
+        }
+      ]
+    },
+    "deprecated": {
+      "patterns": [
+        {
+          "name": "invalid.deprecated.dough",
+          "match": "(?i:\\b(?:def|funcs?)\\b)"
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "name": "meta.function.definition.dough",
+          "match": "(?i:\\b(def)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b)",
+          "captures": {
+            "1": { "name": "invalid.deprecated.dough" },
+            "2": { "name": "entity.name.function.dough" }
+          }
+        },
+        {
+          "name": "meta.point.definition.dough",
+          "match": "(\\(\\*)([A-Za-z_][A-Za-z0-9_]*)(:?\\))",
+          "captures": {
+            "2": { "name": "entity.name.label.point.declaration.dough" }
+          }
+        },
+        {
+          "name": "meta.dict.definition.dough",
+          "match": "(?i:\\b(?:locked\\s+)?dict\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*:)",
+          "captures": {
+            "1": { "name": "entity.name.type.dough" }
+          }
+        }
+      ]
+    },
     "keywords": {
       "patterns": [
         {
           "name": "keyword.control.dough",
-          "match": "(?i:\\b(?:if|elif|else|otherwise|ifcase|case|default|outlier|break|then|end|def|import|awaitval|return|yield|yeild|dict|locked|conf|as|each|in|do|loop|asa)\\b)"
+          "match": "(?i:\\b(?:if|elif|else|otherwise|ifcase|case|default|outlier|is|x|break|then|end|def|import|awaitval|return|yield|yeild|dict|locked|conf|as|each|in|do|loop|asa)\\b)"
         }
       ]
     },
@@ -104,7 +150,15 @@
       "patterns": [
         {
           "name": "support.function.builtin.dough",
-          "match": "(?i:\\b(?:Print|Input|readln|Max|Min|exit|conf|Store|request)\\b)"
+          "match": "(?i:\\b(?:Print|Input|readln|Max|Min|exit|conf|Store|request|debug|breakpoint)\\b)"
+        }
+      ]
+    },
+    "calls": {
+      "patterns": [
+        {
+          "name": "entity.name.function.call.dough",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()"
         }
       ]
     },

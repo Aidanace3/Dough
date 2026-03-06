@@ -12,15 +12,24 @@ const CLOSING_TO_OPENING = {
 const POINT_DECL_RE = /^\s*\(\*([A-Za-z_][A-Za-z0-9_]*)\:?\)\s*awaitval\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*\)/i;
 const LEGACY_POINT_CASE_RE = /^\s*\*([A-Za-z_][A-Za-z0-9_]*)\s+ifcase\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*\)\s*$/i;
 const CONF_RE = /^\s*conf\s+[A-Za-z_][A-Za-z0-9_]*\s*\.\s*[A-Za-z_][A-Za-z0-9_]*\s*=\s*.+;?\s*$/i;
-const AS_LOOP_RE = /^\s*as\s*\(\s*.+\s*\)\s*:?\s*$/i;
-const EACH_LOOP_RE = /^\s*each\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s+in\s+.+\)\s*(?:do)?\s*:?\s*$/i;
+const AS_LOOP_RE = /^\s*as\s*\(\s*.+\s*\)\s*:\s*$/i;
+const EACH_LOOP_RE = /^\s*each\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s+in\s+.+\)\s*do\s*:\s*$/i;
 const YIELD_DISPATCH_RE = /^\s*(?:yield|yeild)\s+.+\s*>>\s*\*[A-Za-z_][A-Za-z0-9_]*(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?\s*;?\s*$/i;
-const YIELD_CALL_RE = /^\s*(?:yield|yeild)\s*\(.+\)\s*;?\s*$/i;
+const YIELD_CALL_RE = /^\s*(?:yield|yeild)\s*\(\s*.+\s*>>\s*\*[A-Za-z_][A-Za-z0-9_]*\s*\)\s*;?\s*$/i;
 const RETURN_POINT_RE = /^\s*return\b.+>>\s*\(?\s*(?:\*[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*|this)\s*\)?\s*;?\s*$/i;
 const STORE_RE = /^\s*store\s*\(\s*.+\s+asa\s+[A-Za-z_][A-Za-z0-9_]*\s*>>\s*\*[A-Za-z_][A-Za-z0-9_]*\s*\)\s*;?\s*$/i;
 const REQUEST_RE = /^\s*request\s*\(\s*.+\s*<<\s*\*[A-Za-z_][A-Za-z0-9_]*\s*\.\s*[A-Za-z_][A-Za-z0-9_]*\s*\)\s*;?\s*$/i;
+const DEF_DECL_RE = /^def\s+[A-Za-z_][A-Za-z0-9_]*/i;
+const DEF_DECL_CAPTURE_RE = /^def\s+([A-Za-z_][A-Za-z0-9_]*)/i;
+const IF_HEADER_ACTION_RE = /^(if|elif|else|otherwise)\b.*::\s*(.+)$/i;
 const COND_RE = /^(if|elif)\s*\((.*)\)/i;
 const BARE_ASSIGNMENT_RE = /(^|[^=!<>])=($|[^=>])/;
+const CALL_CAPTURE_RE = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
+const NON_FUNCTION_CALLS = new Set([
+  'if', 'elif', 'ifcase', 'as', 'each', 'awaitval', 'store', 'request',
+  'yield', 'yeild', 'return', 'print', 'input', 'readln', 'max', 'min',
+  'exit', 'conf', 'debug', 'breakpoint'
+]);
 
 function activate(context) {
   const diagnostics = vscode.languages.createDiagnosticCollection('dough-syntax');
@@ -380,8 +389,11 @@ function runLineGrammarChecks(document, lines, problems) {
   const explicitPointCalls = new Set();
   const implicitPointCalls = new Set();
   const pointRefs = [];
+  const declaredFunctions = new Map();
+  const calledFunctions = new Set();
   const functionScope = createFunctionScopeIndex(lines);
   const loopScope = createLoopScopeIndex(lines);
+  const pointScope = createPointScopeIndex(lines);
 
   for (let li = 0; li < lines.length; li++) {
     const original = lines[li];
@@ -392,6 +404,20 @@ function runLineGrammarChecks(document, lines, problems) {
 
     const pointDecl = line.match(POINT_DECL_RE);
     if (pointDecl) {
+      if (declaredPoints.has(pointDecl[1].toLowerCase())) {
+        problems.push(
+          diagnostic(
+            document,
+            li,
+            0,
+            li,
+            original.length,
+            `Point '*${pointDecl[1]}' is declared more than once.`,
+            vscode.DiagnosticSeverity.Warning
+          )
+        );
+      }
+
       declaredPoints.set(pointDecl[1].toLowerCase(), { name: pointDecl[1], line: li });
     } else if (/^\s*\(\*/.test(line) && /\bawaitval\b/i.test(line)) {
       problems.push(
@@ -407,9 +433,48 @@ function runLineGrammarChecks(document, lines, problems) {
       );
     }
 
+    if (/\bawaitval\s*\(/i.test(line) && !pointDecl && !LEGACY_POINT_CASE_RE.test(line)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "awaitval must be used in a point declaration: (*Point:) awaitval(value;)",
+          vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
     const legacyPoint = line.match(LEGACY_POINT_CASE_RE);
     if (legacyPoint) {
+      if (declaredPoints.has(legacyPoint[1].toLowerCase())) {
+        problems.push(
+          diagnostic(
+            document,
+            li,
+            0,
+            li,
+            original.length,
+            `Point '*${legacyPoint[1]}' is declared more than once.`,
+            vscode.DiagnosticSeverity.Warning
+          )
+        );
+      }
+
       declaredPoints.set(legacyPoint[1].toLowerCase(), { name: legacyPoint[1], line: li });
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "Legacy point-case syntax is deprecated. Prefer IfCase blocks.",
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
     }
 
     if (/^(if|elif|ifcase)\b/i.test(line)) {
@@ -423,6 +488,25 @@ function runLineGrammarChecks(document, lines, problems) {
             original.length,
             "Conditional is missing '(' or ')'.",
             vscode.DiagnosticSeverity.Error
+          )
+        );
+      }
+    }
+
+    const inlineAction = line.match(IF_HEADER_ACTION_RE);
+    if (inlineAction) {
+      const action = inlineAction[2].trim();
+      const looksValidAction = /^(then|break|yield|yeild)\b/i.test(action) || /^[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(action);
+      if (!looksValidAction) {
+        problems.push(
+          diagnostic(
+            document,
+            li,
+            0,
+            li,
+            original.length,
+            "Inline action after '::' should be Then, Break, yeild/yield, or a function call.",
+            vscode.DiagnosticSeverity.Warning
           )
         );
       }
@@ -470,6 +554,34 @@ function runLineGrammarChecks(document, lines, problems) {
       );
     }
 
+    if (/^yield\b/i.test(line)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "README spelling uses 'yeild'. 'yield' still works but is considered legacy style.",
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+
+    if (/^(yield|yeild)\b/i.test(line) && />>/.test(line) && !/\*\s*[A-Za-z_][A-Za-z0-9_]*/.test(line)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "Point dispatch after yeild should use '*PointName'.",
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+
     if (/^return\b/i.test(line) && line.includes('>>') && !RETURN_POINT_RE.test(line)) {
       problems.push(
         diagnostic(
@@ -512,6 +624,34 @@ function runLineGrammarChecks(document, lines, problems) {
       );
     }
 
+    if (/\bfuncs?\b/i.test(line)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "'Funcs' is Depracated in README and should not be used.",
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+
+    if (/\bloop\s*\(/i.test(line)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "loop(...) syntax is not fully supported yet; prefer as(...) or each(... in ...) do: loops.",
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+
     const cond = line.match(COND_RE);
     if (cond && BARE_ASSIGNMENT_RE.test(cond[2])) {
       problems.push(
@@ -527,7 +667,7 @@ function runLineGrammarChecks(document, lines, problems) {
       );
     }
 
-    if (/^def\b/i.test(line) && !/^def\s+[A-Za-z_][A-Za-z0-9_]*/i.test(line)) {
+    if (/^def\b/i.test(line) && !DEF_DECL_RE.test(line)) {
       problems.push(
         diagnostic(
           document,
@@ -537,6 +677,40 @@ function runLineGrammarChecks(document, lines, problems) {
           original.length,
           'Function declaration must include a valid name after def.',
           vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
+    const functionDecl = line.match(DEF_DECL_CAPTURE_RE);
+    if (functionDecl) {
+      const lowerName = functionDecl[1].toLowerCase();
+      if (declaredFunctions.has(lowerName)) {
+        problems.push(
+          diagnostic(
+            document,
+            li,
+            0,
+            li,
+            original.length,
+            `Function '${functionDecl[1]}' is declared more than once.`,
+            vscode.DiagnosticSeverity.Warning
+          )
+        );
+      }
+
+      declaredFunctions.set(lowerName, { name: functionDecl[1], line: li });
+    }
+
+    if (DEF_DECL_RE.test(line)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "'def' is Depracated in Dough docs; keep only for backward compatibility.",
+          vscode.DiagnosticSeverity.Warning
         )
       );
     }
@@ -627,6 +801,35 @@ function runLineGrammarChecks(document, lines, problems) {
       );
     }
 
+    if (/\bthis\b/i.test(line) && !pointScope.isInsidePoint(li)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "'this' point reference is only valid inside a point handler body.",
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+
+    CALL_CAPTURE_RE.lastIndex = 0;
+    let callMatch;
+    while ((callMatch = CALL_CAPTURE_RE.exec(line)) !== null) {
+      const callName = callMatch[1].toLowerCase();
+      if (NON_FUNCTION_CALLS.has(callName)) {
+        continue;
+      }
+
+      if (functionDecl && callName === functionDecl[1].toLowerCase()) {
+        continue;
+      }
+
+      calledFunctions.add(callName);
+    }
+
     collectPointCalls(line, li, explicitPointCalls, implicitPointCalls, pointRefs);
   }
 
@@ -668,6 +871,24 @@ function runLineGrammarChecks(document, lines, problems) {
         ref.col + ref.length,
         `Point '*${ref.rawName}' is referenced but never declared.`,
         vscode.DiagnosticSeverity.Error
+      )
+    );
+  }
+
+  for (const [lowerName, fn] of declaredFunctions.entries()) {
+    if (lowerName === 'main' || calledFunctions.has(lowerName)) {
+      continue;
+    }
+
+    problems.push(
+      diagnostic(
+        document,
+        fn.line,
+        0,
+        fn.line,
+        lines[fn.line].length,
+        `Function '${fn.name}' is declared but never called.`,
+        vscode.DiagnosticSeverity.Warning
       )
     );
   }
@@ -809,6 +1030,54 @@ function createLoopScopeIndex(lines) {
   return {
     isInsideLoop(lineIndex) {
       return loopLines.has(lineIndex);
+    }
+  };
+}
+
+function createPointScopeIndex(lines) {
+  const pointLines = new Set();
+  let braceDepth = 0;
+  let pendingPointStart = false;
+  const pointDepthMarkers = [];
+
+  for (let li = 0; li < lines.length; li++) {
+    const line = stripLineCommentPreserveQuotes(lines[li]);
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+
+    if (POINT_DECL_RE.test(trimmed) || LEGACY_POINT_CASE_RE.test(trimmed)) {
+      pendingPointStart = true;
+    }
+
+    const opens = countCharOutsideStrings(line, '{');
+    const closes = countCharOutsideStrings(line, '}');
+
+    for (let i = 0; i < opens; i++) {
+      braceDepth++;
+      if (pendingPointStart) {
+        pointDepthMarkers.push(braceDepth);
+        pendingPointStart = false;
+      }
+    }
+
+    if (pointDepthMarkers.length > 0) {
+      pointLines.add(li);
+    }
+
+    for (let i = 0; i < closes; i++) {
+      if (pointDepthMarkers.length > 0 && braceDepth === pointDepthMarkers[pointDepthMarkers.length - 1]) {
+        pointDepthMarkers.pop();
+      }
+
+      braceDepth = Math.max(0, braceDepth - 1);
+    }
+  }
+
+  return {
+    isInsidePoint(lineIndex) {
+      return pointLines.has(lineIndex);
     }
   };
 }
