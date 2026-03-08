@@ -9,14 +9,30 @@ const CLOSING_TO_OPENING = {
   '}': '{'
 };
 
+// Keywords for IntelliSense
+const KEYWORDS = [
+  'if', 'elif', 'else', 'otherwise', 'ifcase', 'case', 'default',
+  'def', 'import', 'break', 'return', 'then', 'end',
+  'dict', 'locked', 'conf', 'yield', 'yeild',
+  'readln', 'input', 'print', 'awaitval',
+  'nopoly', 'const', 'str', 'string', 'int', 'flt', 'arr', 'null',
+  'as', 'each', 'in', 'do'
+];
+
+// Built-in functions for IntelliSense
+const BUILTIN_FUNCTIONS = [
+  'Print', 'Input', 'ReadLn', 'Max', 'Min', 'exit', 'debug', 'breakpoint',
+  'yield', 'yeild', 'store', 'request'
+];
+
 const POINT_DECL_RE = /^\s*\(\*([A-Za-z_][A-Za-z0-9_]*)\:?\)\s*awaitval\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*\)/i;
 const LEGACY_POINT_CASE_RE = /^\s*\*([A-Za-z_][A-Za-z0-9_]*)\s+ifcase\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*\)\s*$/i;
 const CONF_RE = /^\s*conf\s+[A-Za-z_][A-Za-z0-9_]*\s*\.\s*[A-Za-z_][A-Za-z0-9_]*\s*=\s*.+;?\s*$/i;
 const AS_LOOP_RE = /^\s*as\s*\(\s*.+\s*\)\s*:\s*$/i;
 const EACH_LOOP_RE = /^\s*each\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s+in\s+.+\)\s*do\s*:\s*$/i;
-const YIELD_DISPATCH_RE = /^\s*(?:yield|yeild)\s+.+\s*>>\s*\*[A-Za-z_][A-Za-z0-9_]*(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?\s*;?\s*$/i;
-const YIELD_CALL_RE = /^\s*(?:yield|yeild)\s*\(\s*.+\s*>>\s*\*[A-Za-z_][A-Za-z0-9_]*\s*\)\s*;?\s*$/i;
-const RETURN_POINT_RE = /^\s*return\b.+>>\s*\(?\s*(?:\*[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*|this)\s*\)?\s*;?\s*$/i;
+const YIELD_DISPATCH_RE = /^\s*(?:yield|yeild)\s+.+\s*(?:>>|<<)\s*(?:\*?\s*[A-Za-z_][A-Za-z0-9_]*|this)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?\s*;?\s*$/i;
+const YIELD_CALL_RE = /^\s*(?:yield|yeild)\s*\(\s*.+\s*(?:>>|<<)\s*.+\)\s*;?\s*$/i;
+const RETURN_POINT_RE = /^\s*return\b.+(?:>>|<<)\s*\(?\s*(?:\*?\s*[A-Za-z_][A-Za-z0-9_]*|this)\s*\)?\s*;?\s*$/i;
 const STORE_RE = /^\s*store\s*\(\s*.+\s+asa\s+[A-Za-z_][A-Za-z0-9_]*\s*>>\s*\*[A-Za-z_][A-Za-z0-9_]*\s*\)\s*;?\s*$/i;
 const REQUEST_RE = /^\s*request\s*\(\s*.+\s*<<\s*\*[A-Za-z_][A-Za-z0-9_]*\s*\.\s*[A-Za-z_][A-Za-z0-9_]*\s*\)\s*;?\s*$/i;
 const DEF_DECL_RE = /^def\s+[A-Za-z_][A-Za-z0-9_]*/i;
@@ -34,6 +50,171 @@ const NON_FUNCTION_CALLS = new Set([
 function activate(context) {
   const diagnostics = vscode.languages.createDiagnosticCollection('dough-syntax');
   context.subscriptions.push(diagnostics);
+
+  // Register IntelliSense providers
+  const completionProvider = vscode.languages.registerCompletionItemProvider('dough', {
+    provideCompletionItems(document, position) {
+      const line = document.lineAt(position.line).text;
+      const beforeCursor = line.substring(0, position.character);
+      
+      const completions = [];
+      
+      // Add keywords
+      for (const keyword of KEYWORDS) {
+        const item = new vscode.CompletionItem(keyword, vscode.CompletionItemKind.Keyword);
+        item.detail = `Keyword: ${keyword}`;
+        item.insertText = keyword;
+        completions.push(item);
+      }
+      
+      // Add built-in functions
+      for (const func of BUILTIN_FUNCTIONS) {
+        const item = new vscode.CompletionItem(func, vscode.CompletionItemKind.Function);
+        item.detail = `Built-in function: ${func}`;
+        item.insertText = func + '($0)';
+        item.insertTextFormat = vscode.InsertTextFormat.Snippet;
+        completions.push(item);
+      }
+      
+      // Add type keywords with detail
+      const typeKeywords = [
+        { label: 'int', detail: 'Integer type' },
+        { label: 'flt', detail: 'Float type' },
+        { label: 'str', detail: 'String type' },
+        { label: 'arr', detail: 'Array type' },
+        { label: 'dict', detail: 'Dictionary type' },
+        { label: 'const', detail: 'Constant modifier' },
+        { label: 'nopoly', detail: 'NoPoly type hint' }
+      ];
+      
+      for (const type of typeKeywords) {
+        const item = new vscode.CompletionItem(type.label, vscode.CompletionItemKind.TypeParameter);
+        item.detail = type.detail;
+        completions.push(item);
+      }
+      
+      // Add point declaration snippet
+      const pointSnippet = new vscode.CompletionItem('(*point:) awaitval(val;)', vscode.CompletionItemKind.Snippet);
+      pointSnippet.detail = 'Point declaration';
+      pointSnippet.insertText = '(*${1:pointName}:) awaitval(${2:value};) {\n\t$0\n}';
+      pointSnippet.insertTextFormat = vscode.InsertTextFormat.Snippet;
+      completions.push(pointSnippet);
+      
+      // Add if statement snippet
+      const ifSnippet = new vscode.CompletionItem('if (condition)', vscode.CompletionItemKind.Snippet);
+      ifSnippet.detail = 'If statement';
+      ifSnippet.insertText = 'if (${1:condition}) {\n\t$0\n}';
+      ifSnippet.insertTextFormat = vscode.InsertTextFormat.Snippet;
+      completions.push(ifSnippet);
+      
+      // Add if-else snippet
+      const ifElseSnippet = new vscode.CompletionItem('if-else', vscode.CompletionItemKind.Snippet);
+      ifElseSnippet.detail = 'If-else statement';
+      ifElseSnippet.insertText = 'if (${1:condition}) {\n\t$2\n} else {\n\t$0\n}';
+      ifElseSnippet.insertTextFormat = vscode.InsertTextFormat.Snippet;
+      completions.push(ifElseSnippet);
+      
+      // Add yield statement snippet
+      const yieldSnippet = new vscode.CompletionItem('yield >> *point', vscode.CompletionItemKind.Snippet);
+      yieldSnippet.detail = 'Yield dispatch';
+      yieldSnippet.insertText = 'yield(${1:value} >> *${2:pointName})';
+      yieldSnippet.insertTextFormat = vscode.InsertTextFormat.Snippet;
+      completions.push(yieldSnippet);
+      
+      // Add each loop snippet
+      const eachSnippet = new vscode.CompletionItem('each (item in iterable)', vscode.CompletionItemKind.Snippet);
+      eachSnippet.detail = 'Each loop';
+      eachSnippet.insertText = 'each (${1:item} in ${2:iterable}) do:\n\t$0';
+      eachSnippet.insertTextFormat = vscode.InsertTextFormat.Snippet;
+      completions.push(eachSnippet);
+      
+      // Add as loop snippet
+      const asSnippet = new vscode.CompletionItem('as (condition)', vscode.CompletionItemKind.Snippet);
+      asSnippet.detail = 'As loop';
+      asSnippet.insertText = 'as(${1:condition}):\n\t$0';
+      asSnippet.insertTextFormat = vscode.InsertTextFormat.Snippet;
+      completions.push(asSnippet);
+      
+      // Add ifcase snippet
+      const ifCaseSnippet = new vscode.CompletionItem('ifcase (expr)', vscode.CompletionItemKind.Snippet);
+      ifCaseSnippet.detail = 'IfCase statement';
+      ifCaseSnippet.insertText = 'ifcase (${1:expression}) {\n\tcase ${2:condition}:\n\t{\n\t\t$0\n\t}\n\tdefault:\n\t{\n\t\t\n\t}\n}';
+      ifCaseSnippet.insertTextFormat = vscode.InsertTextFormat.Snippet;
+      completions.push(ifCaseSnippet);
+      
+      return completions;
+    }
+  });
+  context.subscriptions.push(completionProvider);
+
+  // Register hover provider
+  const hoverProvider = vscode.languages.registerHoverProvider('dough', {
+    provideHover(document, position) {
+      const word = document.getWordRangeAtPosition(position);
+      if (!word) return null;
+      
+      const text = document.getText(word);
+      
+      // Hover information for keywords
+      const keywordHelp = {
+        'if': '**if (condition)** - Conditional statement\n\nUsage: `if (condition) { ... }`',
+        'elif': '**elif (condition)** - Else-if clause\n\nUsage: `elif (condition) { ... }`',
+        'else': '**else** - Else clause\n\nUsage: `else { ... }`',
+        'otherwise': '**otherwise** - Alias for else\n\nUsage: `otherwise { ... }`',
+        'ifcase': '**ifcase (expression)** - Switch-like statement\n\nUsage: `ifcase (expr) { case x: { ... } default: { ... } }`',
+        'case': '**case expression:** - Case clause in IfCase',
+        'default': '**default:** - Default case in IfCase',
+        'def': '**def name(params)** - Function declaration (deprecated)',
+        'yield': '**yield value >> *point** - Dispatch to a point\n\nUsage: `yield(value >> *PointName)`',
+        'yeild': '**yeild** - Legacy spelling of yield',
+        'as': '**as (condition):** - While loop\n\nUsage: `as(condition): { ... }`',
+        'each': '**each (item in iterable) do:** - For-each loop\n\nUsage: `each(item in arr) do: { ... }`',
+        'break': '**break** - Exit loop',
+        'return': '**return value** - Return from function',
+        'dict': '**dict name:** - Dictionary declaration\n\nUsage: `dict myDict: { key: value }`',
+        'locked': '**locked dict (type):** - Type-locked dictionary',
+        'conf': '**conf target.property = value** - Configure array/dict properties',
+        'awaitval': '**awaitval (param;)** - Point parameter declaration',
+        'import': '**import moduleName** - Import module',
+        'const': '**const** - Constant variable modifier',
+        'nopoly': '**nopoly** - NoPoly type hint modifier',
+        'int': '**int** - Integer type',
+        'flt': '**flt** - Float type',
+        'str': '**str** - String type',
+        'arr': '**arr** - Array type',
+        'null': '**null** - Null value'
+      };
+      
+      if (keywordHelp[text.toLowerCase()]) {
+        return new vscode.Hover({
+          language: 'dough',
+          value: keywordHelp[text.toLowerCase()]
+        });
+      }
+      
+      // Hover for built-in functions
+      const funcHelp = {
+        'Print': '**Print(value)** - Print to console\n\n`Print("Hello")`',
+        'Input': '**Input(prompt)** - Read user input\n\n`Input("Name: ")`',
+        'ReadLn': '**ReadLn()** - Read line from console',
+        'Max': '**Max(args...)** - Get maximum value',
+        'Min': '**Min(args...)** - Get minimum value',
+        'exit': '**exit(*PointName)** - Exit a point',
+        'debug': '**debug()** - Breakpoint for debugging',
+        'breakpoint': '**breakpoint()** - Breakpoint for debugging'
+      };
+      
+      if (funcHelp[text]) {
+        return new vscode.Hover({
+          language: 'dough',
+          value: funcHelp[text]
+        });
+      }
+      
+      return null;
+    }
+  });
+  context.subscriptions.push(hoverProvider);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('dough.runCurrentFile', () => runOrDebugCurrentFile(false)),
@@ -402,6 +583,21 @@ function runLineGrammarChecks(document, lines, problems) {
       continue;
     }
 
+    // NEW: Check for if without body (but not for inline actions)
+    if (/^if\s*\([^)]+\)\s*$/.test(line)) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "Missing body after if condition. Expected '{' or statement.",
+          vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
     const pointDecl = line.match(POINT_DECL_RE);
     if (pointDecl) {
       if (declaredPoints.has(pointDecl[1].toLowerCase())) {
@@ -548,13 +744,13 @@ function runLineGrammarChecks(document, lines, problems) {
           0,
           li,
           original.length,
-          "Invalid yeild/yield syntax. Use: yeild(value >> *Point) or yeild value >> *Point as alias",
+          "Invalid yeild/yield syntax. Use: yield(value >> Point), yield value << Point, or with '*' point refs.",
           vscode.DiagnosticSeverity.Error
         )
       );
     }
 
-    if (/^yield\b/i.test(line)) {
+    if (/^yeild\b/i.test(line)) {
       problems.push(
         diagnostic(
           document,
@@ -562,13 +758,13 @@ function runLineGrammarChecks(document, lines, problems) {
           0,
           li,
           original.length,
-          "README spelling uses 'yeild'. 'yield' still works but is considered legacy style.",
+          "[legacy] 'yeild' is accepted, but preferred spelling is 'yield'.",
           vscode.DiagnosticSeverity.Warning
         )
       );
     }
 
-    if (/^(yield|yeild)\b/i.test(line) && />>/.test(line) && !/\*\s*[A-Za-z_][A-Za-z0-9_]*/.test(line)) {
+    if (/\*this\b/i.test(line)) {
       problems.push(
         diagnostic(
           document,
@@ -576,7 +772,7 @@ function runLineGrammarChecks(document, lines, problems) {
           0,
           li,
           original.length,
-          "Point dispatch after yeild should use '*PointName'.",
+          "[preferred] Use 'this' without '*' (write 'this', not '*this').",
           vscode.DiagnosticSeverity.Warning
         )
       );
@@ -590,8 +786,22 @@ function runLineGrammarChecks(document, lines, problems) {
           0,
           li,
           original.length,
-          "Malformed return dispatch. Use: return value >> *Point (or >> this).",
+          "Malformed return dispatch. Use: return value >> this (or >> Point).",
           vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
+    if (/^return\b/i.test(line) && !line.includes('>>') && !line.includes('<<')) {
+      problems.push(
+        diagnostic(
+          document,
+          li,
+          0,
+          li,
+          original.length,
+          "[preferred] Return dispatch style is: return value >> this",
+          vscode.DiagnosticSeverity.Warning
         )
       );
     }
@@ -632,7 +842,7 @@ function runLineGrammarChecks(document, lines, problems) {
           0,
           li,
           original.length,
-          "'Funcs' is Depracated in README and should not be used.",
+          "[deprecated] 'Funcs' is Depracated in README and should not be used.",
           vscode.DiagnosticSeverity.Warning
         )
       );
@@ -646,7 +856,7 @@ function runLineGrammarChecks(document, lines, problems) {
           0,
           li,
           original.length,
-          "loop(...) syntax is not fully supported yet; prefer as(...) or each(... in ...) do: loops.",
+          "[legacy] loop(...) syntax is not fully supported; prefer as(...) or each(... in ...) do:",
           vscode.DiagnosticSeverity.Warning
         )
       );
@@ -661,7 +871,7 @@ function runLineGrammarChecks(document, lines, problems) {
           0,
           li,
           original.length,
-          'Suspicious assignment in condition. Use == for comparison.',
+          'Suspicious assignment in condition. Use == for comparison (or === for strict check).',
           vscode.DiagnosticSeverity.Warning
         )
       );
@@ -709,7 +919,7 @@ function runLineGrammarChecks(document, lines, problems) {
           0,
           li,
           original.length,
-          "'def' is Depracated in Dough docs; keep only for backward compatibility.",
+          "[deprecated] 'def' is Depracated in Dough docs; keep only for backward compatibility.",
           vscode.DiagnosticSeverity.Warning
         )
       );
@@ -899,6 +1109,8 @@ function collectPointCalls(line, lineIndex, explicitPointCalls, implicitPointCal
 
   const explicitRefs = [
     />>\s*\*([A-Za-z_][A-Za-z0-9_]*)/gi,
+    /<<\s*\*([A-Za-z_][A-Za-z0-9_]*)/gi,
+    /\*([A-Za-z_][A-Za-z0-9_]*)\s*>>/gi,
     /\*([A-Za-z_][A-Za-z0-9_]*)\s*<</gi,
     /\b(?:yield|yeild)\s*\(\s*\*([A-Za-z_][A-Za-z0-9_]*)/gi
   ];
@@ -918,6 +1130,7 @@ function collectPointCalls(line, lineIndex, explicitPointCalls, implicitPointCal
 
   const implicitRefs = [
     />>\s*([A-Za-z_][A-Za-z0-9_]*)/gi,
+    /<<\s*([A-Za-z_][A-Za-z0-9_]*)/gi,
     /\breturn\b[^\n]*>>\s*([A-Za-z_][A-Za-z0-9_]*)/gi
   ];
 
