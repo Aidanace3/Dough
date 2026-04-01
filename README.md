@@ -1,30 +1,44 @@
 # Dough Language VS Code Extension
 
-This extension provides syntax highlighting and editor behavior for Dough files.
+VS Code support for Dough / Doe source files.
 
-## Supported file extensions
-- `.doe`
-- `.dough`
+Current extension version: `1.0.0`
 
-## Included features
-- Keyword highlighting (`if`, `elif`, `else`, `ifcase`, `case`, `default`, `def`, `awaitval`, etc.)
-- Type highlighting (`NoPoly`, `Const`, `Int`, `Flt`, `Str`, `String`, `Arr`, `Dict`, `Locked`)
-- Builtin highlighting (`Print`, `Input`, `readln`, `Max`, `Min`, `exit`, `conf`)
-- Operator highlighting (`>>`, `<<`, `::`, `==`, `=>`, `<=`, `>=`, `**`, `%%`, `*|`, `!|`, `!&`, `&&`, `..`)
-- Point syntax highlighting (`(*Point:)`, `*Point`)
-- Dough comment syntax (`//` and `/(` ... `)\`)
-- Language brackets and auto-closing pairs
+Marketplace identifier: `aidanace3.dough-language`
 
-## Run in development host
-1. Open this `Dough` folder in VS Code.
-2. Press `F5`.
-3. In the new Extension Development Host window, open a `.doe` file.
-4. Use command palette:
-   - `Dough: Run Current File`
-   - `Dough: Debug Current File`
+## Features
 
-## Run and Debug (F5) in normal VS Code
-Use a launch configuration like this:
+- syntax highlighting for `.doe` and `.dough`
+- diagnostics for common syntax and point mistakes
+- IntelliSense for keywords, functions, configs, dictionaries, and imports
+- debugger/run commands for the Dough runtime
+- import completion for local modules and `plugin:` assemblies
+
+## Install
+
+### From Marketplace
+
+```powershell
+code --install-extension aidanace3.dough-language
+```
+
+### From source
+
+```powershell
+npm ci
+npx @vscode/vsce package --no-dependencies
+```
+
+Then install the generated `.vsix` in VS Code.
+
+## Run and debug
+
+The extension contributes:
+
+- `Dough: Run Current File`
+- `Dough: Debug Current File`
+
+Minimal `launch.json`:
 
 ```json
 {
@@ -40,17 +54,11 @@ Use a launch configuration like this:
 }
 ```
 
-## Install From Marketplace (Recommended)
-1. From terminal:
-   - `code --install-extension aidanace3.dough-language`
-2. Or in VS Code Extensions, search for:
-   - `aidanace3.dough-language`
+## Development
 
-## Package and install manually (fallback)
-1. Install vsce:
-   - `npm install -g @vscode/vsce`
-2. Package this extension from the `Dough` folder:
-   - `vsce package`
-3. In VS Code:
-   - `Ctrl+Shift+P` -> `Extensions: Install from VSIX...`
-   - choose the generated `.vsix` file.
+Open this `Dough` folder in VS Code and press `F5` to launch an Extension Development Host.
+
+## Notes
+
+- The runtime repo lives at `https://github.com/Aidanace3/Doe-Language`
+- The extension repo lives at `https://github.com/Aidanace3/Dough`

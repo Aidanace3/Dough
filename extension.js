@@ -1,6 +1,8 @@
+
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
+const childProcess = require('child_process');
 
 const OPENING = new Set(['(', '[', '{']);
 const CLOSING_TO_OPENING = {
@@ -11,23 +13,23 @@ const CLOSING_TO_OPENING = {
 
 // Keywords for IntelliSense
 const KEYWORDS = [
-  'if', 'elif', 'else', 'otherwise', 'ifcase', 'case', 'default',
-  'def', 'import', 'break', 'return', 'then', 'end',
+  'if', 'unless', 'elif', 'else', 'otherwise', 'ifcase', 'case', 'default',
+  'def', 'import', 'with', 'new', 'break', 'return', 'then', 'end',
   'dict', 'locked', 'conf', 'yield', 'yeild',
   'readln', 'input', 'print', 'awaitval',
   'nopoly', 'const', 'str', 'string', 'int', 'flt', 'arr', 'null',
-  'as', 'each', 'in', 'do'
+  'as', 'each', 'in', 'do', 'enum', 'map', 'fluc', 'asa'
 ];
 
 // Built-in functions for IntelliSense
 const BUILTIN_FUNCTIONS = [
   'Print', 'Input', 'ReadLn', 'Max', 'Min', 'exit', 'debug', 'breakpoint',
-  'yield', 'yeild', 'store', 'request'
+  'yield', 'yeild', 'store', 'request', 'map'
 ];
 
 const POINT_DECL_RE = /^\s*\(\*([A-Za-z_][A-Za-z0-9_]*)\:?\)\s*awaitval\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*\)/i;
 const LEGACY_POINT_CASE_RE = /^\s*\*([A-Za-z_][A-Za-z0-9_]*)\s+ifcase\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*\)\s*$/i;
-const CONF_RE = /^\s*conf\s+[A-Za-z_][A-Za-z0-9_]*\s*\.\s*[A-Za-z_][A-Za-z0-9_]*\s*=\s*.+;?\s*$/i;
+const CONF_RE = /^\s*conf\s+[A-Za-z_][A-Za-z0-9_]*\s*:?\s*$/i;
 const AS_LOOP_RE = /^\s*as\s*\(\s*.+\s*\)\s*:\s*$/i;
 const EACH_LOOP_RE = /^\s*each\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s+in\s+.+\)\s*do\s*:\s*$/i;
 const YIELD_DISPATCH_RE = /^\s*(?:yield|yeild)\s+.+\s*(?:>>|<<)\s*(?:\*?\s*[A-Za-z_][A-Za-z0-9_]*|this)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?\s*;?\s*$/i;
@@ -37,8 +39,13 @@ const STORE_RE = /^\s*store\s*\(\s*.+\s+asa\s+[A-Za-z_][A-Za-z0-9_]*\s*>>\s*\*[A
 const REQUEST_RE = /^\s*request\s*\(\s*.+\s*<<\s*\*[A-Za-z_][A-Za-z0-9_]*\s*\.\s*[A-Za-z_][A-Za-z0-9_]*\s*\)\s*;?\s*$/i;
 const DEF_DECL_RE = /^def\s+[A-Za-z_][A-Za-z0-9_]*/i;
 const DEF_DECL_CAPTURE_RE = /^def\s+([A-Za-z_][A-Za-z0-9_]*)/i;
-const IF_HEADER_ACTION_RE = /^(if|elif|else|otherwise)\b.*::\s*(.+)$/i;
-const COND_RE = /^(if|elif)\s*\((.*)\)/i;
+const IF_HEADER_ACTION_RE = /^(if|unless|elif|else|otherwise)\b.*::\s*(.+)$/i;
+const VAR_DECL_CAPTURE_RE = /^\s*(?:(?:nopoly|const)\s+)*(?:(int|flt|str|string|arr(?:\[[^\]]+\])?|dict|conf)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/i;
+const DICT_DECL_CAPTURE_RE = /^\s*(?:locked\s+)?dict\s+([A-Za-z_][A-Za-z0-9_]*)\s*:/i;
+const CONF_DECL_CAPTURE_RE = /^\s*conf\s+([A-Za-z_][A-Za-z0-9_]*)\s*:/i;
+const NEW_DECL_CAPTURE_RE = /^\s*new\s+([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:/i;
+const IMPORT_CAPTURE_RE = /^\s*(?:with|import)\s+(.+)$/i;
+
 const BARE_ASSIGNMENT_RE = /(^|[^=!<>])=($|[^=>])/;
 const CALL_CAPTURE_RE = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
 const NON_FUNCTION_CALLS = new Set([
@@ -47,6 +54,148 @@ const NON_FUNCTION_CALLS = new Set([
   'exit', 'conf', 'debug', 'breakpoint'
 ]);
 
+const KEYWORD_DOCS = {
+  if: {
+    detail: 'Conditional branch',
+    documentation: 'Checks a condition and runs the body when it is truthy.\n\nPreferred form:\n`if (condition)::then { ... }`'
+  },
+  unless: {
+    detail: 'Negated conditional',
+    documentation: 'Equivalent to `if (!condition)`.\n\nUseful when the negative case reads more clearly.'
+  },
+  elif: {
+    detail: 'Else-if branch',
+    documentation: 'Adds another conditional branch after an `if`.'
+  },
+  else: {
+    detail: 'Fallback branch',
+    documentation: 'Runs when previous `if`/`elif` branches did not match.'
+  },
+  otherwise: {
+    detail: 'Fallback alias',
+    documentation: 'Acts like `else`, and is also used as the default branch in `IfCase`.'
+  },
+  ifcase: {
+    detail: 'Switch-style branch',
+    documentation: 'Matches one subject value against grouped `Case:` clauses.\n\nUse when several discrete values should share a branch.'
+  },
+  case: {
+    detail: 'IfCase branch',
+    documentation: 'Defines one match arm inside `IfCase`.\n\nGrouped form: `Case:(A, B, C):`'
+  },
+  def: {
+    detail: 'Function declaration',
+    documentation: 'Declares a callable function.\n\nStill supported, but the docs mark it as legacy compared to points.'
+  },
+  with: {
+    detail: 'Module or plugin import',
+    documentation: 'Imports another Doe module or a plugin.\n\nExamples:\n`with Dough-2d`\n`with plugin:Dough-2d`'
+  },
+  new: {
+    detail: 'Array-style constructor',
+    documentation: 'Creates a named array-like value using a type tag.\n\nExample:\n`new windowtype landscape: { 1080, 960, "Title" }`'
+  },
+  dict: {
+    detail: 'Dictionary declaration',
+    documentation: 'Creates a runtime dictionary.\n\nUse field access like `window.title` after construction.'
+  },
+  conf: {
+    detail: 'Config declaration',
+    documentation: 'Declares an importable config dictionary intended for composition with `map(...)`.'
+  },
+  yield: {
+    detail: 'Point dispatch',
+    documentation: 'Sends a value to a point handler.\n\nExamples:\n`yield(value >> *Point)`\n`value >> *Point`'
+  },
+  yeild: {
+    detail: 'Legacy yield spelling',
+    documentation: 'Accepted for compatibility. Prefer `yield` in new code.'
+  },
+  awaitval: {
+    detail: 'Point parameter binder',
+    documentation: 'Defines the parameter received by a point handler.\n\nExample:\n`(*Log:) awaitval(msg;) { ... }`'
+  },
+  as: {
+    detail: 'While-style loop',
+    documentation: 'Repeatedly runs a block while the condition stays truthy.\n\nForm:\n`as(@true): { ... }`'
+  },
+  each: {
+    detail: 'For-each loop',
+    documentation: 'Iterates through an array or dictionary values.\n\nForm:\n`each(item in arr) do: { ... }`'
+  },
+  map: {
+    detail: 'Dictionary/config mapper',
+    documentation: 'Built-in helper for merging configs or projecting selected keys.\n\nExamples:\n`map(base, overlay)`\n`map(window, "width", "title")`'
+  },
+  int: {
+    detail: 'Integer type',
+    documentation: 'Declares an integer variable or config field.'
+  },
+  flt: {
+    detail: 'Floating-point type',
+    documentation: 'Declares a numeric value that may contain decimals.'
+  },
+  str: {
+    detail: 'String type',
+    documentation: 'Declares a text value.'
+  },
+  arr: {
+    detail: 'Array type',
+    documentation: 'Declares an array.\n\nTyped form: `arr[str] names`'
+  },
+  const: {
+    detail: 'Constant modifier',
+    documentation: 'Prevents reassignment after initialization.'
+  },
+  nopoly: {
+    detail: 'NoPoly modifier',
+    documentation: 'Preserves the declared type instead of allowing polymorphic reassignment.'
+  },
+  null: {
+    detail: 'Null value',
+    documentation: 'Represents the absence of a value.'
+  }
+};
+
+const FUNCTION_DOCS = {
+  print: {
+    signature: 'Print(value)',
+    documentation: 'Writes a value to standard output.'
+  },
+  input: {
+    signature: 'Input(prompt)',
+    documentation: 'Prompts the user and returns the entered text.'
+  },
+  readln: {
+    signature: 'ReadLn(index)',
+    documentation: 'Reads a line by index from console input history.'
+  },
+  max: {
+    signature: 'Max(a, b, ...)',
+    documentation: 'Returns the largest numeric argument, or array size when passed one array.'
+  },
+  min: {
+    signature: 'Min(a, b, ...)',
+    documentation: 'Returns the smallest numeric argument, or the lowest Doe index for an array.'
+  },
+  map: {
+    signature: 'map(dict, overlayDict) | map(dict, "key1", "key2")',
+    documentation: 'Merges dictionaries/configs or projects named values into an array.'
+  },
+  exit: {
+    signature: 'exit(*PointName)',
+    documentation: 'Removes a point handler registration.'
+  },
+  debug: {
+    signature: 'debug()',
+    documentation: 'Triggers the runtime debugger when running with `--debug`.'
+  },
+  breakpoint: {
+    signature: 'breakpoint()',
+    documentation: 'Alias for a debugger stop point.'
+  }
+};
+
 function activate(context) {
   const diagnostics = vscode.languages.createDiagnosticCollection('dough-syntax');
   context.subscriptions.push(diagnostics);
@@ -54,25 +203,41 @@ function activate(context) {
   // Register IntelliSense providers
   const completionProvider = vscode.languages.registerCompletionItemProvider('dough', {
     provideCompletionItems(document, position) {
-      const line = document.lineAt(position.line).text;
-      const beforeCursor = line.substring(0, position.character);
-      
+      const importCompletions = collectImportCompletions(document, position);
+      if (importCompletions) {
+        return importCompletions;
+      }
+
+      const memberCompletions = collectMemberCompletions(document, position);
+      if (memberCompletions) {
+        return memberCompletions;
+      }
+
       const completions = [];
-      
-      // Add keywords
+      const symbols = collectDocumentSymbols(document);
+
       for (const keyword of KEYWORDS) {
         const item = new vscode.CompletionItem(keyword, vscode.CompletionItemKind.Keyword);
-        item.detail = `Keyword: ${keyword}`;
+        const doc = KEYWORD_DOCS[keyword.toLowerCase()];
+        item.detail = doc ? doc.detail : `Keyword: ${keyword}`;
+        if (doc) {
+          item.documentation = new vscode.MarkdownString(doc.documentation);
+        }
         item.insertText = keyword;
+        item.sortText = `1_${keyword}`;
         completions.push(item);
       }
-      
-      // Add built-in functions
+
       for (const func of BUILTIN_FUNCTIONS) {
         const item = new vscode.CompletionItem(func, vscode.CompletionItemKind.Function);
-        item.detail = `Built-in function: ${func}`;
+        const doc = FUNCTION_DOCS[func.toLowerCase()];
+        item.detail = doc ? doc.signature : `Built-in function: ${func}`;
+        if (doc) {
+          item.documentation = new vscode.MarkdownString(doc.documentation);
+        }
         item.insertText = func + '($0)';
         item.insertTextFormat = vscode.InsertTextFormat.Snippet;
+        item.sortText = `1_${func}`;
         completions.push(item);
       }
       
@@ -90,6 +255,17 @@ function activate(context) {
       for (const type of typeKeywords) {
         const item = new vscode.CompletionItem(type.label, vscode.CompletionItemKind.TypeParameter);
         item.detail = type.detail;
+        item.documentation = new vscode.MarkdownString((KEYWORD_DOCS[type.label] || {}).documentation || type.detail);
+        item.sortText = `1_${type.label}`;
+        completions.push(item);
+      }
+
+      for (const symbol of symbols) {
+        const item = new vscode.CompletionItem(symbol.label, symbol.kind);
+        item.detail = symbol.detail;
+        item.documentation = new vscode.MarkdownString(symbol.documentation);
+        item.insertText = symbol.insertText || symbol.label;
+        item.sortText = `0_${symbol.label}`;
         completions.push(item);
       }
       
@@ -106,6 +282,12 @@ function activate(context) {
       ifSnippet.insertText = 'if (${1:condition}) {\n\t$0\n}';
       ifSnippet.insertTextFormat = vscode.InsertTextFormat.Snippet;
       completions.push(ifSnippet);
+
+      const unlessSnippet = new vscode.CompletionItem('unless (condition)', vscode.CompletionItemKind.Snippet);
+      unlessSnippet.detail = 'Negated if statement';
+      unlessSnippet.insertText = 'unless (${1:condition})::then\n{\n\t$0\n}';
+      unlessSnippet.insertTextFormat = vscode.InsertTextFormat.Snippet;
+      completions.push(unlessSnippet);
       
       // Add if-else snippet
       const ifElseSnippet = new vscode.CompletionItem('if-else', vscode.CompletionItemKind.Snippet);
@@ -138,13 +320,25 @@ function activate(context) {
       // Add ifcase snippet
       const ifCaseSnippet = new vscode.CompletionItem('ifcase (expr)', vscode.CompletionItemKind.Snippet);
       ifCaseSnippet.detail = 'IfCase statement';
-      ifCaseSnippet.insertText = 'ifcase (${1:expression}) {\n\tcase ${2:condition}:\n\t{\n\t\t$0\n\t}\n\tdefault:\n\t{\n\t\t\n\t}\n}';
+      ifCaseSnippet.insertText = 'ifcase (${1:expression}) {\n\tcase:(${2:One}, ${3:Two}):\n\t{\n\t\t$0\n\t}\n\totherwise:\n\t{\n\t\t\n\t}\n}';
       ifCaseSnippet.insertTextFormat = vscode.InsertTextFormat.Snippet;
       completions.push(ifCaseSnippet);
+
+      const withSnippet = new vscode.CompletionItem('with module', vscode.CompletionItemKind.Snippet);
+      withSnippet.detail = 'Import alias';
+      withSnippet.insertText = 'with ${1:module.name}';
+      withSnippet.insertTextFormat = vscode.InsertTextFormat.Snippet;
+      completions.push(withSnippet);
+
+      const newSnippet = new vscode.CompletionItem('new type name', vscode.CompletionItemKind.Snippet);
+      newSnippet.detail = 'Array-style constructor declaration';
+      newSnippet.insertText = 'new ${1:type} ${2:name}: {\n\t${3:value1},\n\t${4:value2}\n}';
+      newSnippet.insertTextFormat = vscode.InsertTextFormat.Snippet;
+      completions.push(newSnippet);
       
       return completions;
     }
-  });
+  }, '.', ':');
   context.subscriptions.push(completionProvider);
 
   // Register hover provider
@@ -154,63 +348,22 @@ function activate(context) {
       if (!word) return null;
       
       const text = document.getText(word);
-      
-      // Hover information for keywords
-      const keywordHelp = {
-        'if': '**if (condition)** - Conditional statement\n\nUsage: `if (condition) { ... }`',
-        'elif': '**elif (condition)** - Else-if clause\n\nUsage: `elif (condition) { ... }`',
-        'else': '**else** - Else clause\n\nUsage: `else { ... }`',
-        'otherwise': '**otherwise** - Alias for else\n\nUsage: `otherwise { ... }`',
-        'ifcase': '**ifcase (expression)** - Switch-like statement\n\nUsage: `ifcase (expr) { case x: { ... } default: { ... } }`',
-        'case': '**case expression:** - Case clause in IfCase',
-        'default': '**default:** - Default case in IfCase',
-        'def': '**def name(params)** - Function declaration (deprecated)',
-        'yield': '**yield value >> *point** - Dispatch to a point\n\nUsage: `yield(value >> *PointName)`',
-        'yeild': '**yeild** - Legacy spelling of yield',
-        'as': '**as (condition):** - While loop\n\nUsage: `as(condition): { ... }`',
-        'each': '**each (item in iterable) do:** - For-each loop\n\nUsage: `each(item in arr) do: { ... }`',
-        'break': '**break** - Exit loop',
-        'return': '**return value** - Return from function',
-        'dict': '**dict name:** - Dictionary declaration\n\nUsage: `dict myDict: { key: value }`',
-        'locked': '**locked dict (type):** - Type-locked dictionary',
-        'conf': '**conf target.property = value** - Configure array/dict properties',
-        'awaitval': '**awaitval (param;)** - Point parameter declaration',
-        'import': '**import moduleName** - Import module',
-        'const': '**const** - Constant variable modifier',
-        'nopoly': '**nopoly** - NoPoly type hint modifier',
-        'int': '**int** - Integer type',
-        'flt': '**flt** - Float type',
-        'str': '**str** - String type',
-        'arr': '**arr** - Array type',
-        'null': '**null** - Null value'
-      };
-      
-      if (keywordHelp[text.toLowerCase()]) {
-        return new vscode.Hover({
-          language: 'dough',
-          value: keywordHelp[text.toLowerCase()]
-        });
+
+      const symbolHover = createSymbolHover(document, text);
+      if (symbolHover) {
+        return symbolHover;
       }
-      
-      // Hover for built-in functions
-      const funcHelp = {
-        'Print': '**Print(value)** - Print to console\n\n`Print("Hello")`',
-        'Input': '**Input(prompt)** - Read user input\n\n`Input("Name: ")`',
-        'ReadLn': '**ReadLn()** - Read line from console',
-        'Max': '**Max(args...)** - Get maximum value',
-        'Min': '**Min(args...)** - Get minimum value',
-        'exit': '**exit(*PointName)** - Exit a point',
-        'debug': '**debug()** - Breakpoint for debugging',
-        'breakpoint': '**breakpoint()** - Breakpoint for debugging'
-      };
-      
-      if (funcHelp[text]) {
-        return new vscode.Hover({
-          language: 'dough',
-          value: funcHelp[text]
-        });
+
+      const keywordDoc = KEYWORD_DOCS[text.toLowerCase()];
+      if (keywordDoc) {
+        return new vscode.Hover(new vscode.MarkdownString(`**${text}**\n\n${keywordDoc.documentation}`));
       }
-      
+
+      const funcDoc = FUNCTION_DOCS[text.toLowerCase()];
+      if (funcDoc) {
+        return new vscode.Hover(new vscode.MarkdownString(`**${funcDoc.signature}**\n\n${funcDoc.documentation}`));
+      }
+
       return null;
     }
   });
@@ -316,28 +469,46 @@ function resolveRuntimeCommand(folder, explicitRuntime, programPath) {
     return explicitRuntime.trim();
   }
 
-  // Prefer globally installed runtime first so independent files run without project setup.
-  if (looksRunnableCommand('dough')) {
-    return 'dough';
-  }
-
   const root = folder && folder.uri
     ? folder.uri.fsPath
     : findProjectRootFromProgram(programPath);
 
   if (root) {
+    const cmdWrapper = path.join(root, 'dough.cmd');
+    if (fs.existsSync(cmdWrapper)) {
+      return `"${cmdWrapper}"`;
+    }
+
+    const psWrapper = path.join(root, 'dough.ps1');
+    if (fs.existsSync(psWrapper)) {
+      return `powershell -NoProfile -ExecutionPolicy Bypass -File "${psWrapper}"`;
+    }
+
     const projectPath = path.join(root, 'Other_Bullshit', 'Doe-Language.csproj');
     if (fs.existsSync(projectPath)) {
       return `dotnet run --project "${projectPath}" --`;
     }
   }
 
+  if (looksRunnableCommand('dough')) {
+    return 'dough';
+  }
+
   return 'dough';
 }
 
 function looksRunnableCommand(command) {
-  // Lightweight heuristic for common extension host environments.
-  return command && command.length > 0;
+  if (!command || command.trim().length === 0) {
+    return false;
+  }
+
+  try {
+    const probe = process.platform === 'win32' ? 'where' : 'which';
+    childProcess.execFileSync(probe, [command], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function getOwningWorkspaceFolder(uri) {
@@ -381,6 +552,413 @@ function findProjectRootFromProgram(programPath) {
   }
 
   return null;
+}
+
+function collectDocumentSymbols(document) {
+  const symbols = [];
+  const seen = new Set();
+  const lines = document.getText().split(/\r?\n/);
+
+  for (let li = 0; li < lines.length; li++) {
+    const raw = stripLineCommentPreserveQuotes(lines[li]);
+    const line = raw.trim();
+    if (!line) {
+      continue;
+    }
+
+    const functionDecl = line.match(DEF_DECL_CAPTURE_RE);
+    if (functionDecl) {
+      pushSymbol(symbols, seen, {
+        label: functionDecl[1],
+        kind: vscode.CompletionItemKind.Function,
+        detail: `Function defined in this file at line ${li + 1}`,
+        documentation: `User-defined function.\n\nDeclared as:\n\`def ${functionDecl[1]}(...)\``,
+        insertText: `${functionDecl[1]}($0)`
+      });
+    }
+
+    const confDecl = line.match(CONF_DECL_CAPTURE_RE);
+    if (confDecl) {
+      pushSymbol(symbols, seen, {
+        label: confDecl[1],
+        kind: vscode.CompletionItemKind.Struct,
+        detail: `Config declared at line ${li + 1}`,
+        documentation: `Config dictionary.\n\nUse \`map(${confDecl[1]})\` to clone or compose it.`
+      });
+    }
+
+    const dictDecl = line.match(DICT_DECL_CAPTURE_RE);
+    if (dictDecl) {
+      pushSymbol(symbols, seen, {
+        label: dictDecl[1],
+        kind: vscode.CompletionItemKind.Struct,
+        detail: `Dictionary declared at line ${li + 1}`,
+        documentation: `Dictionary value declared in this file.`
+      });
+    }
+
+    const varDecl = line.match(VAR_DECL_CAPTURE_RE);
+    if (varDecl) {
+      const typeName = varDecl[1] || 'value';
+      pushSymbol(symbols, seen, {
+        label: varDecl[2],
+        kind: vscode.CompletionItemKind.Variable,
+        detail: `${typeName} declared at line ${li + 1}`,
+        documentation: `Variable declared in this file.\n\nDeclared type: \`${typeName}\``
+      });
+    }
+
+    const newDecl = line.match(NEW_DECL_CAPTURE_RE);
+    if (newDecl) {
+      pushSymbol(symbols, seen, {
+        label: newDecl[2],
+        kind: vscode.CompletionItemKind.Array,
+        detail: `${newDecl[1]} instance declared at line ${li + 1}`,
+        documentation: `Array-style value created with \`new ${newDecl[1]} ${newDecl[2]}: { ... }\`.`
+      });
+    }
+
+    const importDecl = line.match(IMPORT_CAPTURE_RE);
+    if (importDecl) {
+      const modules = importDecl[1]
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean);
+
+      for (const moduleName of modules) {
+        pushSymbol(symbols, seen, {
+          label: moduleName,
+          kind: vscode.CompletionItemKind.Module,
+          detail: `Imported module at line ${li + 1}`,
+          documentation: moduleName.startsWith('plugin:')
+            ? `Plugin import.\n\nThis loads runtime functions from \`${moduleName}\`.`
+            : `Module import.\n\nImported with \`${line}\`.`
+        });
+      }
+    }
+  }
+
+  return symbols;
+}
+
+function pushSymbol(symbols, seen, symbol) {
+  const key = `${symbol.kind}:${symbol.label.toLowerCase()}`;
+  if (seen.has(key)) {
+    return;
+  }
+
+  seen.add(key);
+  symbols.push(symbol);
+}
+
+function createSymbolHover(document, text) {
+  const target = text.toLowerCase();
+  const lines = document.getText().split(/\r?\n/);
+
+  for (let li = 0; li < lines.length; li++) {
+    const raw = stripLineCommentPreserveQuotes(lines[li]);
+    const line = raw.trim();
+    if (!line) {
+      continue;
+    }
+
+    const functionDecl = line.match(DEF_DECL_CAPTURE_RE);
+    if (functionDecl && functionDecl[1].toLowerCase() === target) {
+      return new vscode.Hover(new vscode.MarkdownString(
+        `**Function \`${functionDecl[1]}\`**\n\nDeclared on line ${li + 1}.\n\nSignature source:\n\`${line}\``
+      ));
+    }
+
+    const confDecl = line.match(CONF_DECL_CAPTURE_RE);
+    if (confDecl && confDecl[1].toLowerCase() === target) {
+      return new vscode.Hover(new vscode.MarkdownString(
+        `**Config \`${confDecl[1]}\`**\n\nDeclared on line ${li + 1}.\n\nConfigs are dictionary-like values intended for import and composition with \`map(...)\`.`
+      ));
+    }
+
+    const dictDecl = line.match(DICT_DECL_CAPTURE_RE);
+    if (dictDecl && dictDecl[1].toLowerCase() === target) {
+      return new vscode.Hover(new vscode.MarkdownString(
+        `**Dictionary \`${dictDecl[1]}\`**\n\nDeclared on line ${li + 1}.`
+      ));
+    }
+
+    const varDecl = line.match(VAR_DECL_CAPTURE_RE);
+    if (varDecl && varDecl[2].toLowerCase() === target) {
+      const typeName = varDecl[1] || 'inferred';
+      return new vscode.Hover(new vscode.MarkdownString(
+        `**Variable \`${varDecl[2]}\`**\n\nDeclared on line ${li + 1}.\n\nType: \`${typeName}\`\n\nInitializer:\n\`${line}\``
+      ));
+    }
+
+    const newDecl = line.match(NEW_DECL_CAPTURE_RE);
+    if (newDecl && newDecl[2].toLowerCase() === target) {
+      return new vscode.Hover(new vscode.MarkdownString(
+        `**${newDecl[1]} value \`${newDecl[2]}\`**\n\nDeclared on line ${li + 1} with array-style \`new\` syntax.`
+      ));
+    }
+  }
+
+  return null;
+}
+
+function collectMemberCompletions(document, position) {
+  const line = document.lineAt(position.line).text.slice(0, position.character);
+  const memberMatch = line.match(/([A-Za-z_][A-Za-z0-9_]*)\.\s*([A-Za-z_][A-Za-z0-9_]*)?$/);
+  if (!memberMatch) {
+    return null;
+  }
+
+  const ownerName = memberMatch[1].toLowerCase();
+  const fieldMap = collectStructuredFields(document);
+  const fields = fieldMap.get(ownerName);
+  if (!fields || fields.length === 0) {
+    return null;
+  }
+
+  return fields.map((field) => {
+    const item = new vscode.CompletionItem(field.name, vscode.CompletionItemKind.Field);
+    item.detail = `${field.type} field on ${memberMatch[1]}`;
+    item.documentation = new vscode.MarkdownString(
+      `Field from \`${field.owner}\`.\n\nDeclared type: \`${field.type}\`${field.line ? `\n\nDeclared on line ${field.line}.` : ''}`
+    );
+    item.insertText = field.name;
+    item.sortText = `0_${field.name}`;
+    return item;
+  });
+}
+
+function collectStructuredFields(document) {
+  const fieldsByOwner = new Map();
+  const lines = document.getText().split(/\r?\n/);
+  const blockStack = [];
+  const aliases = new Map();
+
+  for (let li = 0; li < lines.length; li++) {
+    const rawLine = stripLineCommentPreserveQuotes(lines[li]);
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+
+    const confDecl = line.match(CONF_DECL_CAPTURE_RE);
+    if (confDecl) {
+      blockStack.push({ owner: confDecl[1], braceDepth: 0 });
+    } else {
+      const dictDecl = line.match(DICT_DECL_CAPTURE_RE);
+      if (dictDecl) {
+        blockStack.push({ owner: dictDecl[1], braceDepth: 0 });
+      }
+    }
+
+    const aliasMatch = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*map\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)/i);
+    if (aliasMatch) {
+      aliases.set(aliasMatch[1].toLowerCase(), aliasMatch[2].toLowerCase());
+    }
+
+    if (blockStack.length > 0) {
+      const current = blockStack[blockStack.length - 1];
+      const fieldMatch = line.match(/^\s*(int|flt|str|string|arr(?:\[[^\]]+\])?|dict|conf)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=/i);
+      if (fieldMatch) {
+        const ownerKey = current.owner.toLowerCase();
+        if (!fieldsByOwner.has(ownerKey)) {
+          fieldsByOwner.set(ownerKey, []);
+        }
+
+        fieldsByOwner.get(ownerKey).push({
+          owner: current.owner,
+          name: fieldMatch[2],
+          type: fieldMatch[1],
+          line: li + 1
+        });
+      }
+    }
+
+    const opens = countCharOutsideStrings(rawLine, '{');
+    const closes = countCharOutsideStrings(rawLine, '}');
+    if (blockStack.length > 0) {
+      blockStack[blockStack.length - 1].braceDepth += opens;
+      blockStack[blockStack.length - 1].braceDepth -= closes;
+      if (blockStack[blockStack.length - 1].braceDepth <= 0 && closes > 0) {
+        blockStack.pop();
+      }
+    }
+  }
+
+  for (const [alias, source] of aliases.entries()) {
+    if (fieldsByOwner.has(source) && !fieldsByOwner.has(alias)) {
+      fieldsByOwner.set(alias, fieldsByOwner.get(source));
+    }
+  }
+
+  return fieldsByOwner;
+}
+
+function collectImportCompletions(document, position) {
+  const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
+  const importMatch = linePrefix.match(/^\s*(with|import)\s+(.+)$/i);
+  if (!importMatch) {
+    return null;
+  }
+
+  const spec = importMatch[2].trim();
+  const isPluginImport = /^plugin:/i.test(spec);
+  const suggestions = isPluginImport
+    ? findAvailablePluginImports(document)
+    : findAvailableModuleImports(document);
+
+  if (suggestions.length === 0) {
+    return null;
+  }
+
+  return suggestions.map((entry) => {
+    const item = new vscode.CompletionItem(entry.label, entry.kind);
+    item.detail = entry.detail;
+    item.documentation = new vscode.MarkdownString(entry.documentation);
+    item.insertText = entry.insertText || entry.label;
+    item.sortText = `0_${entry.label}`;
+    return item;
+  });
+}
+
+function findAvailableModuleImports(document) {
+  const roots = buildImportSearchRoots(document);
+  const modules = new Map();
+
+  for (const root of roots) {
+    if (!fs.existsSync(root)) {
+      continue;
+    }
+
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const ext = path.extname(entry.name).toLowerCase();
+      if (ext !== '.doe' && ext !== '.dough') {
+        continue;
+      }
+
+      const moduleName = path.basename(entry.name, ext);
+      if (moduleName.startsWith('.')) {
+        continue;
+      }
+
+      const key = moduleName.toLowerCase();
+      if (!modules.has(key)) {
+        modules.set(key, {
+          label: moduleName,
+          kind: vscode.CompletionItemKind.Module,
+          detail: `Module import from ${root}`,
+          documentation: `Module file: \`${path.join(root, entry.name)}\``
+        });
+      }
+    }
+  }
+
+  return Array.from(modules.values());
+}
+
+function findAvailablePluginImports(document) {
+  const roots = buildPluginSearchRoots(document);
+  const plugins = new Map();
+
+  for (const root of roots) {
+    if (!fs.existsSync(root)) {
+      continue;
+    }
+
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        const nestedDll = path.join(root, entry.name, `${entry.name}.dll`);
+        if (fs.existsSync(nestedDll)) {
+          const label = `plugin:${entry.name}`;
+          plugins.set(label.toLowerCase(), {
+            label,
+            insertText: label,
+            kind: vscode.CompletionItemKind.Module,
+            detail: `Plugin import from ${path.join(root, entry.name)}`,
+            documentation: `Plugin assembly: \`${nestedDll}\``
+          });
+        }
+        continue;
+      }
+
+      if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.dll') {
+        continue;
+      }
+
+      const pluginName = path.basename(entry.name, '.dll');
+      const label = `plugin:${pluginName}`;
+      if (!plugins.has(label.toLowerCase())) {
+        plugins.set(label.toLowerCase(), {
+          label,
+          insertText: label,
+          kind: vscode.CompletionItemKind.Module,
+          detail: `Plugin import from ${root}`,
+          documentation: `Plugin assembly: \`${path.join(root, entry.name)}\``
+        });
+      }
+    }
+  }
+
+  return Array.from(plugins.values());
+}
+
+function buildImportSearchRoots(document) {
+  const roots = new Set();
+  const fileDir = path.dirname(document.uri.fsPath);
+  const workspaceFolder = getOwningWorkspaceFolder(document.uri);
+  const workspaceRoot = workspaceFolder && workspaceFolder.uri ? workspaceFolder.uri.fsPath : null;
+  const projectRoot = findProjectRootFromProgram(document.uri.fsPath);
+
+  addImportRootCandidate(roots, fileDir);
+  addImportRootCandidate(roots, path.join(fileDir, 'lib'));
+  addImportRootCandidate(roots, path.join(fileDir, 'libs'));
+  addImportRootCandidate(roots, path.join(fileDir, 'library'));
+  addImportRootCandidate(roots, path.join(fileDir, 'libraries'));
+
+  for (const root of [workspaceRoot, projectRoot]) {
+    if (!root) {
+      continue;
+    }
+
+    addImportRootCandidate(roots, root);
+    addImportRootCandidate(roots, path.join(root, 'lib'));
+    addImportRootCandidate(roots, path.join(root, 'libs'));
+    addImportRootCandidate(roots, path.join(root, 'library'));
+    addImportRootCandidate(roots, path.join(root, 'libraries'));
+  }
+
+  return Array.from(roots);
+}
+
+function buildPluginSearchRoots(document) {
+  const roots = new Set();
+  const fileDir = path.dirname(document.uri.fsPath);
+  const workspaceFolder = getOwningWorkspaceFolder(document.uri);
+  const workspaceRoot = workspaceFolder && workspaceFolder.uri ? workspaceFolder.uri.fsPath : null;
+  const projectRoot = findProjectRootFromProgram(document.uri.fsPath);
+
+  for (const root of [fileDir, workspaceRoot, projectRoot]) {
+    if (!root) {
+      continue;
+    }
+
+    addImportRootCandidate(roots, path.join(root, 'plugins'));
+    addImportRootCandidate(roots, path.join(root, 'plugin'));
+  }
+
+  return Array.from(roots);
+}
+
+function addImportRootCandidate(roots, candidate) {
+  if (!candidate) {
+    return;
+  }
+
+  roots.add(path.resolve(candidate));
 }
 
 function computeDiagnostics(document) {
@@ -584,7 +1162,7 @@ function runLineGrammarChecks(document, lines, problems) {
     }
 
     // NEW: Check for if without body (but not for inline actions)
-    if (/^if\s*\([^)]+\)\s*$/.test(line)) {
+    if (/^(if|unless)\s*\([^)]+\)\s*$/.test(line)) {
       problems.push(
         diagnostic(
           document,
@@ -673,7 +1251,7 @@ function runLineGrammarChecks(document, lines, problems) {
       );
     }
 
-    if (/^(if|elif|ifcase)\b/i.test(line)) {
+    if (/^(if|unless|elif|ifcase)\b/i.test(line)) {
       if (!line.includes('(') || !line.includes(')')) {
         problems.push(
           diagnostic(
@@ -939,7 +1517,7 @@ function runLineGrammarChecks(document, lines, problems) {
       );
     }
 
-    if (/^default\b/i.test(line) && !line.includes(':')) {
+    if (/^(default|otherwise)\b/i.test(line) && !line.includes(':')) {
       problems.push(
         diagnostic(
           document,
@@ -947,7 +1525,7 @@ function runLineGrammarChecks(document, lines, problems) {
           0,
           li,
           original.length,
-          "Default clause should include ':'.",
+          "Default/Otherwise clause should include ':'.",
           vscode.DiagnosticSeverity.Warning
         )
       );
@@ -977,7 +1555,7 @@ function runLineGrammarChecks(document, lines, problems) {
           0,
           li,
           original.length,
-          "Invalid conf syntax. Use: conf target.property = value",
+          "Invalid conf syntax. Use: conf name: followed by a block.",
           vscode.DiagnosticSeverity.Error
         )
       );

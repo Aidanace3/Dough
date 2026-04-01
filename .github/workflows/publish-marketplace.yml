@@ -24,13 +24,17 @@ jobs:
           node-version: "20"
 
       - name: Install dependencies
+        working-directory: Dough
         run: npm ci
 
       - name: Verify extension entrypoint
+        working-directory: Dough
         run: npm run check
 
       - name: Validate package
+        working-directory: Dough
         run: npx @vscode/vsce package --no-dependencies
 
       - name: Publish to VS Code Marketplace
+        working-directory: Dough
         run: npx @vscode/vsce publish --no-dependencies --pat "${{ secrets.VSCE_PAT }}"
